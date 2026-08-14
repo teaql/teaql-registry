@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::FileBlobStore;
+use crate::blobstore::S3BlobStore;
 use crate::format::pypi::{
     generate_pypi_simple_package_html, generate_pypi_simple_root_html, PyPiFileEntry,
 };
@@ -14,7 +14,7 @@ impl PyPiEngine {
     pub async fn upload_file(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         project_name: &str,
         version: &str,
         filename: &str,
@@ -122,7 +122,7 @@ impl PyPiEngine {
     pub async fn get_package_file(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         filename: &str,
     ) -> Result<Option<(Bytes, String)>> {
         let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {

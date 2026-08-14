@@ -2,7 +2,7 @@ use axum::http::{header, Method, Request, StatusCode};
 use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::FileBlobStore,
+    blobstore::S3BlobStore,
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
 };
@@ -19,8 +19,7 @@ async fn setup_rest_test_app() -> axum::Router {
     let runtime = Arc::new(service_runtime(config).await.expect("connect error"));
     runtime.ensure_schema().await.expect("schema error");
 
-    let test_dir = std::env::temp_dir().join(format!("nexus_rest_test_{}", uuid::Uuid::new_v4().simple()));
-    let blobstore = Arc::new(FileBlobStore::new(&test_dir, "rest-store"));
+    let blobstore = Arc::new(S3BlobStore::from_env("rest-store"));
     blobstore.init().await.expect("init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();

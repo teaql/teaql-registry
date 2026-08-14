@@ -1,3 +1,4 @@
-pub mod file_blobstore;
+pub mod s3_blobstore;
 
-pub use file_blobstore::{BlobChecksums, BlobInfo, FileBlobStore};
+pub use s3_blobstore::{BlobChecksums, BlobInfo, S3BlobStore, S3Config};
+pub type BlobStore = S3BlobStore;

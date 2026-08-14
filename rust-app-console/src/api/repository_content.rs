@@ -7,7 +7,7 @@ use axum::{
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::blobstore::FileBlobStore;
+use crate::blobstore::S3BlobStore;
 use crate::engine::RepositoryDispatcher;
 use crate::services::RepositoryService;
 use nexus_repository_service_core::ServiceRuntime;
@@ -15,7 +15,7 @@ use nexus_repository_service_core::ServiceRuntime;
 #[derive(Clone)]
 pub struct AppState {
     pub runtime: Arc<ServiceRuntime>,
-    pub blobstore: Arc<FileBlobStore>,
+    pub blobstore: Arc<S3BlobStore>,
 }
 
 #[axum::debug_handler]

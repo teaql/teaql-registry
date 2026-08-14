@@ -40,6 +40,10 @@ pub fn build_app(state: AppState) -> Router {
         // Blobstores
         .route("/blobstores", get(rest_blobstores::list_blobstores))
         .route(
+            "/blobstores/s3",
+            post(rest_blobstores::create_s3_blobstore),
+        )
+        .route(
             "/blobstores/file",
             post(rest_blobstores::create_file_blobstore),
         )

@@ -5,7 +5,7 @@ use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 use super::group::GroupEngine;
 use super::hosted::HostedEngine;
 use super::proxy::ProxyEngine;
-use crate::blobstore::FileBlobStore;
+use crate::blobstore::S3BlobStore;
 
 pub struct RepositoryDispatcher;
 
@@ -13,7 +13,7 @@ impl RepositoryDispatcher {
     pub async fn get(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         path: &str,
     ) -> Result<Option<(Bytes, String)>> {
         if !repo.online() {
@@ -35,7 +35,7 @@ impl RepositoryDispatcher {
     pub async fn put(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         path: &str,
         data: &[u8],
         content_type: &str,

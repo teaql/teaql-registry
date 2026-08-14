@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::FileBlobStore;
+use crate::blobstore::S3BlobStore;
 use crate::format::maven::parse_maven_path;
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -12,7 +12,7 @@ impl HostedEngine {
     pub async fn handle_get(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         path: &str,
     ) -> Result<Option<(Bytes, String)>> {
         let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {
@@ -39,7 +39,7 @@ impl HostedEngine {
     pub async fn handle_put(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         path: &str,
         data: &[u8],
         content_type: &str,

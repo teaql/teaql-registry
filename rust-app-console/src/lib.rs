@@ -7,5 +7,5 @@ pub mod security;
 pub mod services;
 
 pub use api::{build_app, AppState};
-pub use blobstore::FileBlobStore;
+pub use blobstore::S3BlobStore;
 pub use context::{NexusContextExt, TenantInfo};

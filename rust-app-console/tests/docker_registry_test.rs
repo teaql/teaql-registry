@@ -3,7 +3,7 @@ use bytes::Bytes;
 use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::FileBlobStore,
+    blobstore::S3BlobStore,
     format::docker::{
         compute_sha256_digest, DockerDescriptor, DockerManifestV2, DockerTagList,
         DOCKER_CONFIG_JSON_MEDIA_TYPE, DOCKER_LAYER_GZIP_MEDIA_TYPE, DOCKER_MANIFEST_V2_MEDIA_TYPE,
@@ -22,9 +22,7 @@ async fn setup_docker_test_app() -> axum::Router {
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime connect error"));
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let test_dir =
-        std::env::temp_dir().join(format!("nexus_docker_test_{}", uuid::Uuid::new_v4().simple()));
-    let blobstore = Arc::new(FileBlobStore::new(&test_dir, "docker-blobs"));
+    let blobstore = Arc::new(S3BlobStore::from_env("docker-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();

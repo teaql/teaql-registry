@@ -1,6 +1,6 @@
 use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
 use nexus_repository_service_core_workspace::{
-    blobstore::FileBlobStore,
+    blobstore::S3BlobStore,
     engine::{GroupEngine, HostedEngine},
     services::{BlobStoreService, RepositoryService},
 };
@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 async fn setup_engine_env() -> (
     Arc<nexus_repository_service_core::ServiceRuntime>,
-    Arc<FileBlobStore>,
+    Arc<S3BlobStore>,
     u64,
 ) {
     let config = ServiceRuntimeConfig {
@@ -19,8 +19,7 @@ async fn setup_engine_env() -> (
     let runtime = Arc::new(service_runtime(config).await.expect("connect error"));
     runtime.ensure_schema().await.expect("schema error");
 
-    let test_dir = std::env::temp_dir().join(format!("nexus_engine_test_{}", uuid::Uuid::new_v4().simple()));
-    let blobstore = Arc::new(FileBlobStore::new(&test_dir, "engine-store"));
+    let blobstore = Arc::new(S3BlobStore::from_env("engine-store"));
     blobstore.init().await.expect("init error");
 
     let bs_name = format!("bs-eng-{}", uuid::Uuid::new_v4().simple());

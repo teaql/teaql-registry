@@ -1,17 +1,16 @@
-use nexus_repository_service_core_workspace::blobstore::FileBlobStore;
-use tempfile::tempdir;
+use nexus_repository_service_core_workspace::blobstore::S3BlobStore;
 
 #[tokio::test]
-async fn test_file_blobstore_create_read_and_checksums() {
+async fn test_s3_blobstore_create_read_and_checksums() {
     use md5::Md5;
     use sha1::Sha1;
     use sha2::{Digest, Sha256};
 
-    let temp = tempdir().expect("tempdir failed");
-    let store = FileBlobStore::new(temp.path(), "test-store");
+    let store_name = format!("test-store-{}", uuid::Uuid::new_v4().simple());
+    let store = S3BlobStore::from_env(store_name);
     store.init().await.expect("init failed");
 
-    let payload = b"Hello Nexus Rust BlobStore!";
+    let payload = b"Hello Nexus Rust S3 BlobStore!";
     let info = store.create_blob(payload).await.expect("create_blob failed");
 
     let mut sha1_h = Sha1::new();
@@ -30,7 +29,6 @@ async fn test_file_blobstore_create_read_and_checksums() {
     assert_eq!(info.checksums.sha1, expected_sha1);
     assert_eq!(info.checksums.sha256, expected_sha256);
     assert_eq!(info.checksums.md5, expected_md5);
-    assert!(info.blob_ref.starts_with("test-store@"));
 
     // Read blob back
     let data = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
@@ -38,9 +36,9 @@ async fn test_file_blobstore_create_read_and_checksums() {
 }
 
 #[tokio::test]
-async fn test_file_blobstore_empty_blob() {
-    let temp = tempdir().expect("tempdir failed");
-    let store = FileBlobStore::new(temp.path(), "empty-store");
+async fn test_s3_blobstore_empty_blob() {
+    let store_name = format!("empty-store-{}", uuid::Uuid::new_v4().simple());
+    let store = S3BlobStore::from_env(store_name);
     store.init().await.expect("init failed");
 
     let payload = b"";
@@ -59,9 +57,9 @@ async fn test_file_blobstore_empty_blob() {
 }
 
 #[tokio::test]
-async fn test_file_blobstore_binary_payload() {
-    let temp = tempdir().expect("tempdir failed");
-    let store = FileBlobStore::new(temp.path(), "bin-store");
+async fn test_s3_blobstore_binary_payload() {
+    let store_name = format!("bin-store-{}", uuid::Uuid::new_v4().simple());
+    let store = S3BlobStore::from_env(store_name);
     store.init().await.expect("init failed");
 
     // 128KB pseudo-binary payload
@@ -78,12 +76,12 @@ async fn test_file_blobstore_binary_payload() {
 }
 
 #[tokio::test]
-async fn test_file_blobstore_delete_and_non_existent() {
-    let temp = tempdir().expect("tempdir failed");
-    let store = FileBlobStore::new(temp.path(), "del-store");
+async fn test_s3_blobstore_delete_and_non_existent() {
+    let store_name = format!("del-store-{}", uuid::Uuid::new_v4().simple());
+    let store = S3BlobStore::from_env(store_name);
     store.init().await.expect("init failed");
 
-    let info = store.create_blob(b"Ephemeral content").await.unwrap();
+    let info = store.create_blob(b"Ephemeral S3 content").await.unwrap();
     assert!(store.read_blob(&info.blob_ref).await.is_ok());
 
     store.delete_blob(&info.blob_ref).await.expect("delete_blob failed");
@@ -95,15 +93,14 @@ async fn test_file_blobstore_delete_and_non_existent() {
 }
 
 #[tokio::test]
-async fn test_file_blobstore_path_prefixing() {
-    let temp = tempdir().expect("tempdir failed");
-    let store = FileBlobStore::new(temp.path(), "prefix-store");
-    
-    let path = store.get_blob_path("ab123456-7890");
-    let path_str = path.to_string_lossy();
-    assert!(path_str.contains("/content/ab/ab123456-7890"));
+async fn test_s3_blobstore_exists() {
+    let store_name = format!("exists-store-{}", uuid::Uuid::new_v4().simple());
+    let store = S3BlobStore::from_env(store_name);
+    store.init().await.expect("init failed");
 
-    let short_path = store.get_blob_path("a");
-    let short_path_str = short_path.to_string_lossy();
-    assert!(short_path_str.contains("/content/00/a"));
+    let info = store.create_blob(b"Check existence").await.unwrap();
+    assert!(store.exists_blob(&info.blob_ref).await.unwrap());
+
+    store.delete_blob(&info.blob_ref).await.unwrap();
+    assert!(!store.exists_blob(&info.blob_ref).await.unwrap());
 }

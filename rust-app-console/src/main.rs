@@ -5,7 +5,7 @@ use tracing::info;
 use nexus_repository_service_core::{service_runtime_from_env, ServiceRuntime};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::FileBlobStore,
+    blobstore::S3BlobStore,
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
 };
@@ -16,7 +16,7 @@ async fn seed_initial_data(runtime: &ServiceRuntime) -> Result<(), Box<dyn std::
     let default_blob_store = if let Some(bs) = blob_stores.into_iter().find(|s| s.name() == "default") {
         bs
     } else {
-        BlobStoreService::create(runtime, "default", "data/blobs/default", true).await?
+        BlobStoreService::create(runtime, "default", "s3://teaql-blobs/default", true).await?
     };
 
     // 2. Default Repositories
@@ -235,9 +235,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.ensure_schema().await?;
     info!("TeaQL PostgreSQL schema verified and synchronized.");
 
-    // 2. Initialize Blob Store
-    let blob_store_path = std::env::var("BLOB_STORE_ROOT").unwrap_or_else(|_| "data/blobs".to_string());
-    let blobstore = Arc::new(FileBlobStore::new(&blob_store_path, "default"));
+    // 2. Initialize S3 Blob Store (RustFS / S3)
+    let blobstore = Arc::new(S3BlobStore::from_env("default"));
     blobstore.init().await?;
 
     // 3. Seed baseline initial configuration

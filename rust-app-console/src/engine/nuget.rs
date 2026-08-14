@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::FileBlobStore;
+use crate::blobstore::S3BlobStore;
 use crate::format::nuget::{create_nuget_service_index, NuGetPackageVersions, NuGetServiceIndex};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -16,7 +16,7 @@ impl NuGetEngine {
     pub async fn upload_package(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         id: &str,
         version: &str,
         nupkg_data: &[u8],
@@ -88,7 +88,7 @@ impl NuGetEngine {
     pub async fn get_package_file(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &FileBlobStore,
+        blobstore: &S3BlobStore,
         id: &str,
         version: &str,
     ) -> Result<Option<Bytes>> {

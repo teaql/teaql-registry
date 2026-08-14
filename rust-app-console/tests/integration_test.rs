@@ -3,7 +3,7 @@ use bytes::Bytes;
 use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::FileBlobStore,
+    blobstore::S3BlobStore,
     security::password::hash_password,
     services::{
         BlobStoreService, ComponentService, RepositoryService, SecurityService,
@@ -22,8 +22,7 @@ async fn setup_test_app() -> axum::Router {
     let runtime = service_runtime(config).await.expect("Runtime connect error");
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let test_dir = std::env::temp_dir().join(format!("nexus_int_test_{}", uuid::Uuid::new_v4().simple()));
-    let blobstore = Arc::new(FileBlobStore::new(&test_dir, "test-blobs"));
+    let blobstore = Arc::new(S3BlobStore::from_env("test-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     // Seed baseline test data
