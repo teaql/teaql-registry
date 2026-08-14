@@ -8,28 +8,52 @@ use crate::services::SaveAuditedExt;
 pub struct ComponentService;
 
 impl ComponentService {
+    pub async fn get_by_id(ctx: &ServiceRuntime, component_id: u64) -> Result<Option<Component>> {
+        let rows = Q::components()
+            .with_id_is(component_id)
+            .limit(1)
+            .comment("what: Get component by id")
+            .purpose("why: Get component by id")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|e| anyhow!("Failed to get component by id: {}", e))?;
+
+        if let Some(comp) = rows.into_iter().next() {
+            if comp.name().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(comp))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn list_by_content_repository(
         ctx: &ServiceRuntime,
         content_repo_id: u64,
         limit: u64,
         offset: u64,
     ) -> Result<SmartList<Component>> {
-        let records = Q::components_minimal()
-            .select_self_fields()
+        let rows = Q::components()
             .filter_by_content_repository(content_repo_id)
             .offset(offset, limit)
             .comment("what: Load components for content repository")
             .purpose("why: REST components query API")
-            .execute_for_records(ctx)
+            .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list components: {}", e))?;
 
-        let mut items = Vec::new();
-        for rec in records {
-            let comp = Component::from_record(rec).map_err(|e| anyhow!("Failed to parse component: {}", e))?;
-            items.push(comp);
-        }
-        Ok(SmartList::new(items))
+        let filtered: Vec<Component> = rows.into_iter().filter(|c| !c.name().is_empty()).collect();
+        Ok(SmartList::new(filtered))
+    }
+
+    pub async fn list_by_repository(
+        ctx: &ServiceRuntime,
+        content_repo_id: u64,
+    ) -> Result<Vec<Component>> {
+        let smart_list = Self::list_by_content_repository(ctx, content_repo_id, 1000, 0).await?;
+        Ok(smart_list.into_iter().collect())
     }
 
     pub async fn find_or_create(
@@ -40,8 +64,7 @@ impl ComponentService {
         version_name: &str,
         kind: &str,
     ) -> Result<Component> {
-        let records = Q::components_minimal()
-            .select_self_fields()
+        let rows = Q::components()
             .filter_by_content_repository(content_repo_id)
             .with_namespace_is(namespace)
             .with_name_is(name)
@@ -49,28 +72,39 @@ impl ComponentService {
             .limit(1)
             .comment("what: Check existing component")
             .purpose("why: Avoid duplicate component creations")
-            .execute_for_records(ctx)
+            .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to check existing component: {}", e))?;
 
-        if let Some(rec) = records.into_iter().next() {
-            let comp = Component::from_record(rec).map_err(|e| anyhow!("Failed to parse component: {}", e))?;
+        if let Some(comp) = rows.into_iter().find(|c| !c.name().is_empty()) {
             return Ok(comp);
         }
 
+        Self::create(ctx, content_repo_id, namespace, name, version_name, version_name, kind).await
+    }
+
+    pub async fn create(
+        ctx: &ServiceRuntime,
+        content_repo_id: u64,
+        namespace: &str,
+        name: &str,
+        version_name: &str,
+        normalized_version: &str,
+        kind: &str,
+    ) -> Result<Component> {
         let mut comp = Q::components()
-            .purpose("why: Create new component entity")
+            .purpose("why: Create new component record")
             .new_entity(ctx);
 
         comp.update_content_repository_id(content_repo_id);
         comp.update_namespace(namespace);
         comp.update_name(name);
         comp.update_version_name(version_name);
-        comp.update_normalized_version(version_name);
+        comp.update_normalized_version(normalized_version);
         comp.update_kind(kind);
 
         comp.clone()
-            .audit_as("Creating component coordinate")
+            .audit_as("Creating component record")
             .save_with(ctx)
             .await
             .map_err(|e| anyhow!("Failed to save component: {}", e))?;
@@ -78,25 +112,20 @@ impl ComponentService {
         Ok(comp)
     }
 
-    pub async fn get_by_id(
-        ctx: &ServiceRuntime,
-        id: u64,
-    ) -> Result<Option<Component>> {
-        let records = Q::components_minimal()
-            .select_self_fields()
-            .with_id_is(id)
+    pub async fn delete(ctx: &ServiceRuntime, component_id: u64) -> Result<()> {
+        let rows = Q::components()
+            .with_id_is(component_id)
             .limit(1)
-            .comment("what: Load component by ID")
-            .purpose("why: REST component details API")
-            .execute_for_records(ctx)
+            .comment("what: Find component to delete")
+            .purpose("why: Delete component")
+            .execute_for_list(ctx)
             .await
-            .map_err(|e| anyhow!("Failed to load component: {}", e))?;
+            .map_err(|e| anyhow!("Failed to find component for delete: {}", e))?;
 
-        if let Some(rec) = records.into_iter().next() {
-            let comp = Component::from_record(rec).map_err(|e| anyhow!("Failed to parse component: {}", e))?;
-            Ok(Some(comp))
-        } else {
-            Ok(None)
+        if let Some(mut comp) = rows.into_iter().next() {
+            comp.update_name("");
+            let _ = comp.audit_as("Deleting component").save_with(ctx).await?;
         }
+        Ok(())
     }
 }

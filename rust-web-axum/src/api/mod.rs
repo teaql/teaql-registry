@@ -1,6 +1,7 @@
 pub mod cargo_registry;
 pub mod docker_registry;
 pub mod gomod_registry;
+pub mod metrics;
 pub mod npm_registry;
 pub mod nuget_registry;
 pub mod pypi_registry;
@@ -11,6 +12,7 @@ pub mod rest_repositories;
 pub mod rest_security;
 pub mod rest_status;
 pub mod rest_tenants;
+pub mod search;
 
 pub use repository_content::AppState;
 
@@ -55,9 +57,11 @@ pub fn build_app(state: AppState) -> Router {
             "/security/anonymous",
             get(rest_security::get_anonymous_config).put(rest_security::update_anonymous_config),
         )
-        // Components and Assets
+        // Components and Assets Search & Management
         .route("/components", get(rest_components::list_components))
         .route("/assets", get(rest_components::list_assets))
+        .route("/search", get(search::handle_search_components))
+        .route("/search/assets", get(search::handle_search_assets))
         // Status
         .route("/status", get(rest_status::status_ok))
         .route("/status/writable", get(rest_status::status_writable));
@@ -81,6 +85,8 @@ pub fn build_app(state: AppState) -> Router {
         );
 
     Router::new()
+        // Prometheus Metrics
+        .route("/metrics", get(metrics::handle_metrics))
         // Docker Registry v2 ping & repo operations
         .route("/v2", get(docker_registry::handle_v2_ping))
         .route("/v2/", get(docker_registry::handle_v2_ping))

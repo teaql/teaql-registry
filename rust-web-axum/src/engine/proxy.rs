@@ -20,7 +20,13 @@ impl ProxyEngine {
             return Ok(Some(cached));
         }
 
-        // 2. Fetch from upstream remote URL
+        // 2. Check Negative Cache
+        if crate::engine::proxy_cache::ProxyNegativeCache::global().is_negative_cached(&repo.name(), path) {
+            info!("Proxy negative cache hit for {}:{}", repo.name(), path);
+            return Ok(None);
+        }
+
+        // 3. Fetch from upstream remote URL
         let remote_url = repo.remote_url();
         if remote_url.is_empty() {
             return Ok(None);
@@ -40,6 +46,9 @@ impl ProxyEngine {
         let response = client.get(&target_url).send().await?;
 
         if !response.status().is_success() {
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                crate::engine::proxy_cache::ProxyNegativeCache::global().record_not_found(&repo.name(), path, 300);
+            }
             return Ok(None);
         }
 

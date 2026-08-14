@@ -8,6 +8,7 @@ pub mod hosted;
 pub mod npm;
 pub mod nuget;
 pub mod proxy;
+pub mod proxy_cache;
 pub mod pypi;
 pub mod registry;
 
@@ -21,5 +22,6 @@ pub use hosted::HostedEngine;
 pub use npm::NpmEngine;
 pub use nuget::NuGetEngine;
 pub use proxy::ProxyEngine;
+pub use proxy_cache::ProxyNegativeCache;
 pub use pypi::PyPiEngine;
 pub use registry::RepositoryRegistry;

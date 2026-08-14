@@ -1,13 +1,17 @@
 pub mod asset_service;
 pub mod blob_store_service;
+pub mod cleanup_service;
 pub mod component_service;
+pub mod gc_service;
 pub mod repository_service;
 pub mod security_service;
 pub mod tenant_service;
 
 pub use asset_service::AssetService;
 pub use blob_store_service::BlobStoreService;
+pub use cleanup_service::{CleanupPolicy, CleanupReport, CleanupService};
 pub use component_service::ComponentService;
+pub use gc_service::{BlobStoreGcService, GcReport};
 pub use repository_service::RepositoryService;
 pub use security_service::SecurityService;
 pub use tenant_service::TenantService;

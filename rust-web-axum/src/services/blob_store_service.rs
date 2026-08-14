@@ -13,7 +13,7 @@ impl BlobStoreService {
     pub async fn list(ctx: &ServiceRuntime) -> Result<SmartList<BlobStoreConfiguration>> {
         let rows = Q::blob_store_configurations_minimal()
             .select_self_fields()
-            .limit(100)
+            .limit(1000)
             .comment("what: Load all blob store configurations for tenant")
             .purpose("why: REST blobstores list API")
             .execute_for_list(ctx)
@@ -29,7 +29,7 @@ impl BlobStoreService {
         let rows = Q::blob_store_configurations_minimal()
             .select_self_fields()
             .filter_by_tenant(tenant_id)
-            .limit(100)
+            .limit(1000)
             .comment("what: Load all blob store configurations for tenant")
             .purpose("why: REST blobstores list API")
             .execute_for_list(ctx)
