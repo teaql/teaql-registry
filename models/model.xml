@@ -1,0 +1,203 @@
+<root
+    name="nexus-repository-service"
+    data_service="postgres"
+    org="doublechaintech"
+    _module_key="root">
+
+    <platform
+        _name="Nexus Platform"
+        _module="Core Domain"
+        _module_key="core"
+        name="Nexus Repository Platform"
+        platform_version="3.95.1-01" />
+
+    <tenant
+        _name="Tenant"
+        _module="Core Domain"
+        _module_key="core"
+        platform="platform()"
+        name="Default Tenant"
+        code="default"
+        description="Default Tenant Environment"
+        enabled="true" />
+
+    <repository_type
+        platform="platform()"
+        id="id()"
+        name="string()"
+        code="string()"
+        _constant="true"
+        _identifier="code"
+        _name="Repository Type"
+        _module="Core Domain"
+        _module_key="core">
+        <_value id="1001" name="Hosted" code="HOSTED" />
+        <_value id="1002" name="Proxy" code="PROXY" />
+        <_value id="1003" name="Group" code="GROUP" />
+    </repository_type>
+
+    <repository_format
+        platform="platform()"
+        id="id()"
+        name="string()"
+        code="string()"
+        _constant="true"
+        _identifier="code"
+        _name="Repository Format"
+        _module="Core Domain"
+        _module_key="core">
+        <_value id="1001" name="Maven2" code="MAVEN2" />
+        <_value id="1002" name="Raw" code="RAW" />
+        <_value id="1003" name="Docker" code="DOCKER" />
+        <_value id="1004" name="npm" code="NPM" />
+        <_value id="1005" name="PyPI" code="PYPI" />
+        <_value id="1006" name="Go Modules" code="GOMOD" />
+        <_value id="1007" name="Cargo" code="CARGO" />
+        <_value id="1008" name="NuGet" code="NUGET" />
+    </repository_format>
+
+    <write_policy
+        platform="platform()"
+        id="id()"
+        name="string()"
+        code="string()"
+        _constant="true"
+        _identifier="code"
+        _name="Write Policy"
+        _module="Core Domain"
+        _module_key="core">
+        <_value id="1001" name="Allow Write" code="ALLOW_WRITE" />
+        <_value id="1002" name="Allow Once" code="ALLOW_ONCE" />
+        <_value id="1003" name="Read Only" code="READ_ONLY" />
+    </write_policy>
+
+    <blob_store_type
+        platform="platform()"
+        id="id()"
+        name="string()"
+        code="string()"
+        _constant="true"
+        _identifier="code"
+        _name="Blob Store Type"
+        _module="Core Domain"
+        _module_key="core">
+        <_value id="1001" name="File" code="FILE" />
+        <_value id="1002" name="S3" code="S3" />
+    </blob_store_type>
+
+    <user_status
+        platform="platform()"
+        id="id()"
+        name="string()"
+        code="string()"
+        _constant="true"
+        _identifier="code"
+        _name="User Status"
+        _module="Core Domain"
+        _module_key="core">
+        <_value id="1001" name="Active" code="ACTIVE" />
+        <_value id="1002" name="Disabled" code="DISABLED" />
+        <_value id="1003" name="Locked" code="LOCKED" />
+    </user_status>
+
+    <blob_store_configuration
+        _name="Blob Store Configuration"
+        _module="Storage Domain"
+        _module_key="storage"
+        tenant="tenant()"
+        name="default"
+        blob_store_type="blob_store_type()"
+        path="/opt/nexus/blobs/default"
+        total_size="1073741824l"
+        blob_count="100" />
+
+    <repository_configuration
+        _name="Repository Configuration"
+        _module="Repository Domain"
+        _module_key="repository"
+        tenant="tenant()"
+        name="maven-releases"
+        recipe_name="maven2-hosted"
+        repository_type="repository_type()"
+        repository_format="repository_format()"
+        write_policy="write_policy()"
+        blob_store="blob_store_configuration()"
+        online="true"
+        remote_url="https://repo1.maven.org/maven2" />
+
+    <content_repository
+        _name="Content Repository"
+        _module="Repository Domain"
+        _module_key="repository"
+        repository_id="1l"
+        format_name="maven2" />
+
+    <component
+        _name="Component"
+        _module="Repository Domain"
+        _module_key="repository"
+        content_repository="content_repository()"
+        namespace="org.apache.commons"
+        name="commons-lang3"
+        version_name="3.12.0"
+        normalized_version="3.12.0"
+        kind="jar" />
+
+    <asset_blob
+        _name="Asset Blob"
+        _module="Storage Domain"
+        _module_key="storage"
+        blob_store="blob_store_configuration()"
+        blob_ref="default@b7f83e20-5c6a-4d2a-89a1-8d2a6a12b4e8"
+        blob_size="587392l"
+        content_type="application/java-archive"
+        sha1_checksum="7e02b7e5e3a8ef5b4f8d2a6a12b4e8c1a9e3d5b7"
+        sha256_checksum="4a5c8e2a1b9f6d7c8e3a2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e"
+        md5_checksum="d41d8cd98f00b204e9800998ecf8427e" />
+
+    <asset
+        _name="Asset"
+        _module="Repository Domain"
+        _module_key="repository"
+        content_repository="content_repository()"
+        component_id="1l"
+        asset_blob="asset_blob()"
+        path="/org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.jar"
+        kind="jar" />
+
+    <security_user
+        _name="Security User"
+        _module="Security Domain"
+        _module_key="security"
+        _audit_mask_fields="password_hash,email"
+        tenant="tenant()"
+        username="admin"
+        first_name="Administrator"
+        last_name="User"
+        password_hash="sha512$hashedpassword"
+        user_status="user_status()"
+        email="admin@example.com" />
+
+    <security_role
+        _name="Security Role"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        role_id="nx-admin"
+        name="Nexus Administrator Role"
+        description="Full administrator access"
+        read_only="true" />
+
+    <security_privilege
+        _name="Security Privilege"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        privilege_id="nx-all"
+        name="All Privileges"
+        description="All administrative permissions"
+        privilege_type="wildcard"
+        permission_pattern="*.*.*"
+        read_only="true" />
+
+</root>
