@@ -1,9 +1,9 @@
-use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
-use nexus_repository_service_core_workspace::services::{
+use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry::services::{
     AssetService, BlobStoreService, ComponentService, RepositoryService, SecurityService,
 };
 
-async fn get_test_runtime() -> nexus_repository_service_core::ServiceRuntime {
+async fn get_test_runtime() -> teaql_registry_core::ServiceRuntime {
     let config = ServiceRuntimeConfig {
         database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
         database_user: "postgres".to_string(),

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bytes::Bytes;
-use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
 use crate::format::cargo::{get_cargo_index_path, CargoIndexConfig, CargoIndexRecord};

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
-use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
 

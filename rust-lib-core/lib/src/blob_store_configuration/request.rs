@@ -2188,7 +2188,7 @@ impl<R> BlobStoreConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::blob_store_types_minimal().filter(...);
     /// let request = crate::Q::blob_store_configurations().with_blob_store_type_matching(dynamic_query);
@@ -2218,7 +2218,7 @@ impl<R> BlobStoreConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::blob_store_types_minimal().filter(...);
     /// let request = crate::Q::blob_store_configurations().without_blob_store_type_matching(dynamic_query);

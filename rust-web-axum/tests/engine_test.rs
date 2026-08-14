@@ -1,5 +1,5 @@
-use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
-use nexus_repository_service_core_workspace::{
+use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry::{
     blobstore::{BlobStore, S3BlobStore},
     engine::{GroupEngine, HostedEngine},
     services::{BlobStoreService, RepositoryService},
@@ -7,7 +7,7 @@ use nexus_repository_service_core_workspace::{
 use std::sync::Arc;
 
 async fn setup_engine_env() -> (
-    Arc<nexus_repository_service_core::ServiceRuntime>,
+    Arc<teaql_registry_core::ServiceRuntime>,
     Arc<dyn BlobStore>,
     u64,
 ) {

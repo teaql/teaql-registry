@@ -1,4 +1,4 @@
-use nexus_repository_service_core_workspace::format::raw::sanitize_raw_path;
+use teaql_registry::format::raw::sanitize_raw_path;
 
 #[test]
 fn test_sanitize_raw_path_leading_slashes() {

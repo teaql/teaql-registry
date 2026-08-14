@@ -1,13 +1,17 @@
 [package]
-name = "nexus-repository-service-core-workspace"
+name = "teaql-registry"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-description = "High-performance Rust rewrite of Sonatype Nexus Repository Core with native PostgreSQL storage powered by TeaQL"
+description = "High-performance extensible artifact and package registry service powered by TeaQL"
 license = "MIT OR Apache-2.0"
 
+[[bin]]
+name = "teaql-registry"
+path = "src/main.rs"
+
 [dependencies]
-nexus_repository_service_core = { package = "nexus-repository-service-core", path = "../rust-lib-core/lib" }
+teaql_registry_core = { package = "teaql-registry-core", path = "../rust-lib-core/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
 teaql-core = "4.2.12"
 teaql-runtime = "4.2.12"

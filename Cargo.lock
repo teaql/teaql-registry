@@ -1048,69 +1048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-repository-service-core"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "chrono",
- "deadpool",
- "deadpool-postgres",
- "deadpool-runtime",
- "futures-util",
- "log",
- "rust_decimal",
- "serde",
- "serde_json",
- "teaql-core",
- "teaql-data-service",
- "teaql-macros",
- "teaql-provider-postgres",
- "teaql-runtime",
- "teaql-sql",
- "teaql-tool-core",
- "tokio",
- "tokio-postgres",
- "tokio-util",
-]
-
-[[package]]
-name = "nexus-repository-service-core-workspace"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64",
- "bytes",
- "chrono",
- "futures-util",
- "hex",
- "hmac 0.12.1",
- "http",
- "md-5 0.10.6",
- "nexus-repository-service-core",
- "quick-xml",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "teaql-core",
- "teaql-data-service",
- "teaql-provider-postgres",
- "teaql-runtime",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tower 0.4.13",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1983,6 +1920,69 @@ dependencies = [
  "teaql-sql",
  "tokio",
  "tokio-postgres",
+]
+
+[[package]]
+name = "teaql-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "hex",
+ "hmac 0.12.1",
+ "http",
+ "md-5 0.10.6",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "teaql-core",
+ "teaql-data-service",
+ "teaql-provider-postgres",
+ "teaql-registry-core",
+ "teaql-runtime",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "teaql-registry-core"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "chrono",
+ "deadpool",
+ "deadpool-postgres",
+ "deadpool-runtime",
+ "futures-util",
+ "log",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "teaql-core",
+ "teaql-data-service",
+ "teaql-macros",
+ "teaql-provider-postgres",
+ "teaql-runtime",
+ "teaql-sql",
+ "teaql-tool-core",
+ "tokio",
+ "tokio-postgres",
+ "tokio-util",
 ]
 
 [[package]]

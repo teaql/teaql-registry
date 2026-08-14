@@ -2,7 +2,7 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <groupId>com.example.nexusdemo</groupId>
+    <groupId>com.example.teaqlregistrydemo</groupId>
     <artifactId>math-lib</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -15,13 +15,13 @@
 
     <distributionManagement>
         <repository>
-            <id>nexus-releases</id>
-            <name>Nexus Release Repository</name>
+            <id>teaql-releases</id>
+            <name>TeaQL Registry Release Repository</name>
             <url>http://localhost:8081/repository/maven-releases/</url>
         </repository>
         <snapshotRepository>
-            <id>nexus-snapshots</id>
-            <name>Nexus Snapshot Repository</name>
+            <id>teaql-snapshots</id>
+            <name>TeaQL Registry Snapshot Repository</name>
             <url>http://localhost:8081/repository/maven-snapshots/</url>
         </snapshotRepository>
     </distributionManagement>

@@ -13,14 +13,14 @@ pub use security_service::SecurityService;
 pub use tenant_service::TenantService;
 
 pub trait SaveAuditedExt<T: teaql_core::Entity + teaql_runtime::LedgerEntity> {
-    fn save_with<'a, C: nexus_repository_service_core::TeaqlRuntime + Sync + ?Sized + 'a>(
+    fn save_with<'a, C: teaql_registry_core::TeaqlRuntime + Sync + ?Sized + 'a>(
         self,
         ctx: &'a C,
     ) -> impl std::future::Future<Output = Result<teaql_runtime::GraphNode, anyhow::Error>> + Send + 'a;
 }
 
 impl<T: teaql_core::Entity + teaql_runtime::LedgerEntity + Send + 'static> SaveAuditedExt<T> for teaql_core::Audited<T> {
-    fn save_with<'a, C: nexus_repository_service_core::TeaqlRuntime + Sync + ?Sized + 'a>(
+    fn save_with<'a, C: teaql_registry_core::TeaqlRuntime + Sync + ?Sized + 'a>(
         self,
         ctx: &'a C,
     ) -> impl std::future::Future<Output = Result<teaql_runtime::GraphNode, anyhow::Error>> + Send + 'a {

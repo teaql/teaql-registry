@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 
-use nexus_repository_service_core::{service_runtime_from_env, ServiceRuntime};
-use nexus_repository_service_core_workspace::{
+use teaql_registry_core::{service_runtime_from_env, ServiceRuntime};
+use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     context::RegistryContextExt,
@@ -259,7 +259,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(8081);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    info!("Nexus Repository Core listening on http://{}", addr);
+    info!("TeaQL Registry listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 

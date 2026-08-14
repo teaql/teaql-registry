@@ -1,4 +1,4 @@
-use nexus_repository_service_core_workspace::security::{
+use teaql_registry::security::{
     auth::parse_basic_auth,
     password::{hash_password, verify_password},
     rbac::RbacChecker,

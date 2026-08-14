@@ -1,15 +1,15 @@
 <root
-    name="nexus-repository-service"
+    name="teaql-registry-service"
     data_service="postgres"
     org="doublechaintech"
     _module_key="root">
 
     <platform
-        _name="Nexus Platform"
+        _name="TeaQL Registry Platform"
         _module="Core Domain"
         _module_key="core"
-        name="Nexus Repository Platform"
-        platform_version="3.95.1-01" />
+        name="TeaQL Registry Platform"
+        platform_version="1.0.0" />
 
     <tenant
         _name="Tenant"
@@ -107,7 +107,7 @@
         tenant="tenant()"
         name="default"
         blob_store_type="blob_store_type()"
-        path="/opt/nexus/blobs/default"
+        path="s3://teaql-blobs/default"
         total_size="1073741824l"
         blob_count="100" />
 
@@ -184,7 +184,7 @@
         _module_key="security"
         tenant="tenant()"
         role_id="nx-admin"
-        name="Nexus Administrator Role"
+        name="TeaQL Registry Administrator Role"
         description="Full administrator access"
         read_only="true" />
 

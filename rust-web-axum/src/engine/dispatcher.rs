@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use super::group::GroupEngine;
 use super::hosted::HostedEngine;

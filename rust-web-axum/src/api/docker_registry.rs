@@ -30,7 +30,7 @@ pub async fn handle_v2_ping() -> Response {
     (StatusCode::OK, headers, "{}").into_response()
 }
 
-async fn resolve_docker_repo(state: &AppState, repo_name: Option<&str>) -> Result<nexus_repository_service_core::RepositoryConfiguration, (StatusCode, String)> {
+async fn resolve_docker_repo(state: &AppState, repo_name: Option<&str>) -> Result<teaql_registry_core::RepositoryConfiguration, (StatusCode, String)> {
     let name = repo_name.unwrap_or("docker-hosted");
     match RepositoryService::find_by_name(&state.runtime, name).await {
         Ok(Some(r)) => Ok(r),

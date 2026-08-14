@@ -1,4 +1,4 @@
-use nexus_repository_service_core_workspace::format::docker::{
+use teaql_registry::format::docker::{
     compute_sha256_digest, is_valid_digest, parse_docker_path, DockerDescriptor, DockerManifestV2,
     DockerPath, DOCKER_CONFIG_JSON_MEDIA_TYPE, DOCKER_LAYER_GZIP_MEDIA_TYPE,
     DOCKER_MANIFEST_V2_MEDIA_TYPE,

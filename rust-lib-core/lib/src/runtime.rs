@@ -12,9 +12,9 @@ pub type DataServicePool = deadpool_postgres::Pool;
 pub type DataServiceExecutor = ServiceRuntimeExecutor;
 pub type ServiceRuntime = teaql_runtime::UserContext;
 
-pub const DATABASE_URL_ENV: &str = "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_URL";
-pub const DATABASE_USER_ENV: &str = "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_USER";
-pub const DATABASE_PASSWORD_ENV: &str = "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_PASSWORD";
+pub const DATABASE_URL_ENV: &str = "TEAQL_REGISTRY_CORE_DATABASE_URL";
+pub const DATABASE_USER_ENV: &str = "TEAQL_REGISTRY_CORE_DATABASE_USER";
+pub const DATABASE_PASSWORD_ENV: &str = "TEAQL_REGISTRY_CORE_DATABASE_PASSWORD";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServiceRuntimeConfig {
     pub database_url: String,
@@ -197,6 +197,25 @@ pub async fn service_runtime_from_pool(pool: DataServicePool) -> Result<ServiceR
 
 
 fn env_value(name: &'static str) -> Result<String, ServiceRuntimeError> {
+    if let Ok(v) = std::env::var(name) {
+        return Ok(v);
+    }
+    let fallback = match name {
+        "TEAQL_REGISTRY_CORE_DATABASE_URL" => "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_URL",
+        "TEAQL_REGISTRY_CORE_DATABASE_USER" => "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_USER",
+        "TEAQL_REGISTRY_CORE_DATABASE_PASSWORD" => "NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_PASSWORD",
+        _ => "",
+    };
+    if !fallback.is_empty() {
+        if let Ok(v) = std::env::var(fallback) {
+            return Ok(v);
+        }
+    }
+    if name.contains("DATABASE_URL") {
+        if let Ok(v) = std::env::var("DATABASE_URL") {
+            return Ok(v);
+        }
+    }
     std::env::var(name).map_err(|source| ServiceRuntimeError::MissingEnv { name, source })
 }
 

@@ -2,7 +2,7 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <groupId>com.example.nexusdemo</groupId>
+    <groupId>com.example.teaqlregistrydemo</groupId>
     <artifactId>app-consumer</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -15,8 +15,8 @@
 
     <repositories>
         <repository>
-            <id>nexus-group</id>
-            <name>Nexus Public Group</name>
+            <id>teaql-group</id>
+            <name>TeaQL Registry Public Group</name>
             <url>http://localhost:8081/repository/maven-public/</url>
             <releases>
                 <enabled>true</enabled>
@@ -30,9 +30,9 @@
     </repositories>
 
     <dependencies>
-        <!-- The published custom component from Nexus -->
+        <!-- The published custom component from TeaQL Registry -->
         <dependency>
-            <groupId>com.example.nexusdemo</groupId>
+            <groupId>com.example.teaqlregistrydemo</groupId>
             <artifactId>math-lib</artifactId>
             <version>1.0.0</version>
         </dependency>

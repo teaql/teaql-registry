@@ -16,7 +16,7 @@ TeaQL Registry is an extensible multi-format artifact and package repository ser
 3. **Open-Closed Repository Protocol Dispatch (`RepositoryHandler` & `RepositoryRegistry`)**:
    Each package management ecosystem (Docker, Maven, NPM, PyPI, Cargo, Go, NuGet, Raw) is modeled as a pluggable `RepositoryHandler`. Adding new package formats requires implementing the handler interface and registering it, leaving existing dispatcher logic closed for modification.
 
-4. **Runtime Boundary Multi-Tenancy (`NexusTenantRequestPolicy`)**:
+4. **Runtime Boundary Multi-Tenancy (`TeaQLRegistryTenantRequestPolicy`)**:
    Tenant data boundary enforcement occurs at the TeaQL query execution boundary. Queries automatically inject tenant scoping filters via `RequestPolicy` hooks.
 
 ---
@@ -29,7 +29,7 @@ TeaQL Registry is an extensible multi-format artifact and package repository ser
                                │  (Passed across handlers & domain services)  │
                                ├──────────────────────────────────────────────┤
                                │  - TenantInfo (Multi-tenant context)         │
-                               │  - NexusTenantRequestPolicy (SQL enforcement)│
+                               │  - TeaQLRegistryTenantRequestPolicy (SQL)    │
                                │  - BlobStoreManager (Storage registry)       │
                                │  - RepositoryRegistry (Format handlers)      │
                                └──────────────────────────────────────────────┘

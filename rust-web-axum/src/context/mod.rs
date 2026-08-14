@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nexus_repository_service_core::ServiceRuntime;
+use teaql_registry_core::ServiceRuntime;
 use teaql_core::{Expr, SelectQuery};
 use teaql_runtime::{RequestPolicy, RuntimeError, UserContext};
 
@@ -13,9 +13,12 @@ pub struct TenantInfo {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NexusTenantRequestPolicy;
+pub struct TeaQLRegistryTenantRequestPolicy;
 
-impl RequestPolicy for NexusTenantRequestPolicy {
+// Keep alias for backwards compatibility
+pub type NexusTenantRequestPolicy = TeaQLRegistryTenantRequestPolicy;
+
+impl RequestPolicy for TeaQLRegistryTenantRequestPolicy {
     fn enforce_select(
         &self,
         ctx: &UserContext,
@@ -49,7 +52,7 @@ pub trait RegistryContextExt {
     fn set_tenant(&mut self, tenant_id: u64, tenant_name: &str);
     fn tenant_id(&self) -> u64;
     fn tenant_name(&self) -> &str;
-    fn init_nexus_policy(&mut self);
+    fn init_tenant_policy(&mut self);
 
     fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>);
     fn blobstore(&self) -> Arc<dyn BlobStore>;
@@ -71,7 +74,7 @@ impl RegistryContextExt for ServiceRuntime {
             tenant_id,
             tenant_name: tenant_name.to_string(),
         });
-        self.set_request_policy(NexusTenantRequestPolicy);
+        self.set_request_policy(TeaQLRegistryTenantRequestPolicy);
     }
 
     fn tenant_id(&self) -> u64 {
@@ -86,8 +89,8 @@ impl RegistryContextExt for ServiceRuntime {
             .unwrap_or("Default Platform")
     }
 
-    fn init_nexus_policy(&mut self) {
-        self.set_request_policy(NexusTenantRequestPolicy);
+    fn init_tenant_policy(&mut self) {
+        self.set_request_policy(TeaQLRegistryTenantRequestPolicy);
     }
 
     fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>) {
@@ -120,7 +123,7 @@ impl RegistryContextExt for ServiceRuntime {
     }
 
     fn init_registry_context(&mut self, blobstore: Arc<dyn BlobStore>) {
-        self.init_nexus_policy();
+        self.init_tenant_policy();
         self.set_blobstore(blobstore);
         self.set_repository_registry(RepositoryRegistry::new());
     }

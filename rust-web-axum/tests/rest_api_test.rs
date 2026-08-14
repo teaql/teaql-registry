@@ -1,6 +1,6 @@
 use axum::http::{header, Method, Request, StatusCode};
-use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
-use nexus_repository_service_core_workspace::{
+use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     security::password::hash_password,

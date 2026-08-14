@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use bytes::Bytes;
-use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
 
 use crate::blobstore::BlobStore;

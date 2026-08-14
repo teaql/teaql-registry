@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use nexus_repository_service_core_workspace::blobstore::{
+use teaql_registry::blobstore::{
     BlobStore, FileBlobStore, MemoryBlobStore, S3BlobStore,
 };
 use tempfile::tempdir;

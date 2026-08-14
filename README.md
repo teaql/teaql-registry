@@ -1,6 +1,6 @@
 # TeaQL Registry
 
-TeaQL Registry is a multi-format package and artifact repository service built with the TeaQL framework and Rust.
+TeaQL Registry is a high-performance, extensible multi-format package and artifact repository service built with the TeaQL framework and Rust.
 
 ---
 
@@ -16,9 +16,11 @@ TeaQL Registry is a multi-format package and artifact repository service built w
   - **NuGet (.NET)**: NuGet v3 Service Index, Flat Container endpoints, and `dotnet nuget push`.
   - **Raw**: Arbitrary binary and document file uploads and downloads over HTTP.
 - **Runtime-Boundary Multi-Tenancy**:
-  - Tenant data boundaries are enforced centrally at the runtime boundary via `NexusTenantRequestPolicy` on `UserContext`.
-- **Storage & Security**:
-  - High-performance S3 Object Storage (`S3BlobStore`) tested with RustFS / MinIO / AWS S3, supporting streaming upload, chunking, and content hashing (SHA-1, SHA-256, MD5).
+  - Tenant data boundaries are enforced centrally at the runtime boundary via `TeaQLRegistryTenantRequestPolicy` on `UserContext`.
+- **Pluggable Storage Abstraction**:
+  - Polymorphic `BlobStore` trait supporting S3 Object Storage (`S3BlobStore` with RustFS / MinIO / AWS S3), POSIX filesystem (`FileBlobStore`), and memory (`MemoryBlobStore`).
+  - Streaming uploads, chunking, and automated content hashing (SHA-1, SHA-256, MD5).
+- **Security & Access Control**:
   - Role-based access control (RBAC), privilege matching, and anonymous access management.
 
 ---
@@ -27,8 +29,8 @@ TeaQL Registry is a multi-format package and artifact repository service built w
 
 ```text
 ├── models/             # TeaQL domain entity definitions (model.xml)
-├── rust-lib-core/      # Generated core models and query layer
-├── rust-web-axum/      # Format engines, S3 storage service, REST APIs, and test suite
+├── rust-lib-core/      # Generated core models and query layer (teaql-registry-core)
+├── rust-web-axum/      # Format engines, storage service, REST APIs, and test suite (teaql-registry)
 └── demo-components/    # Client integration examples and configurations
 ```
 
@@ -47,9 +49,9 @@ docker run -d --name teaql-rustfs \
 
 ### 2. Environment Configuration
 ```bash
-export NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nexus_db"
-export NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_USER="postgres"
-export NEXUS_REPOSITORY_SERVICE_CORE_DATABASE_PASSWORD="postgres"
+export TEAQL_REGISTRY_CORE_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nexus_db"
+export TEAQL_REGISTRY_CORE_DATABASE_USER="postgres"
+export TEAQL_REGISTRY_CORE_DATABASE_PASSWORD="postgres"
 export S3_ENDPOINT="http://127.0.0.1:9010"
 export S3_ACCESS_KEY="rustfsadmin"
 export S3_SECRET_KEY="rustfsadmin"
@@ -65,7 +67,7 @@ cargo test -- --test-threads=1
 
 ### 4. Start Service
 ```bash
-cargo run --bin nexus-repository-service-core-workspace
+cargo run --bin teaql-registry
 ```
 
 The service will listen on `http://0.0.0.0:8081`.

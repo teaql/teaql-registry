@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, LazyLock};
 

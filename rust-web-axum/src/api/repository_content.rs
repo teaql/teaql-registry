@@ -10,7 +10,7 @@ use tracing::{error, info};
 use crate::blobstore::BlobStore;
 use crate::engine::RepositoryDispatcher;
 use crate::services::RepositoryService;
-use nexus_repository_service_core::ServiceRuntime;
+use teaql_registry_core::ServiceRuntime;
 
 #[derive(Clone)]
 pub struct AppState {

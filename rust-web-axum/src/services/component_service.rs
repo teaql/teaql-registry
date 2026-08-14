@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use nexus_repository_service_core::{
+use teaql_registry_core::{
     Component, Q, ServiceRuntime,
 };
 use teaql_core::{Entity, SmartList};

@@ -1,8 +1,8 @@
 use axum::http::{header, Method, Request, StatusCode};
 use base64::Engine;
 use bytes::Bytes;
-use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
-use nexus_repository_service_core_workspace::{
+use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},

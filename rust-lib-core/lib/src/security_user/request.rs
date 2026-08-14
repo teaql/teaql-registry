@@ -2421,7 +2421,7 @@ impl<R> SecurityUserRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::user_statuses_minimal().filter(...);
     /// let request = crate::Q::security_users().with_user_status_matching(dynamic_query);
@@ -2451,7 +2451,7 @@ impl<R> SecurityUserRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```rust
+    /// ```text
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::user_statuses_minimal().filter(...);
     /// let request = crate::Q::security_users().without_user_status_matching(dynamic_query);
