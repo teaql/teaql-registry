@@ -28,7 +28,7 @@ TeaQL Registry is a multi-format package and artifact repository service built w
 ```text
 ├── models/             # TeaQL domain entity definitions (model.xml)
 ├── rust-lib-core/      # Generated core models and query layer
-├── rust-app-console/   # Format engines, S3 storage service, REST APIs, and test suite
+├── rust-web-axum/      # Format engines, S3 storage service, REST APIs, and test suite
 └── demo-components/    # Client integration examples and configurations
 ```
 
