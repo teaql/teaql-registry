@@ -1,4 +1,44 @@
-use nexus_repository_service_core_workspace::blobstore::S3BlobStore;
+use std::sync::Arc;
+use nexus_repository_service_core_workspace::blobstore::{
+    BlobStore, FileBlobStore, MemoryBlobStore, S3BlobStore,
+};
+use tempfile::tempdir;
+
+async fn assert_blobstore_contract(store: Arc<dyn BlobStore>) {
+    store.init().await.expect("init failed");
+
+    let payload = b"Polymorphic BlobStore Contract Payload";
+    let info = store.create_blob(payload).await.expect("create_blob failed");
+
+    assert_eq!(info.size, payload.len() as i64);
+    assert!(store.exists_blob(&info.blob_ref).await.unwrap());
+
+    let read_back = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
+    assert_eq!(read_back.as_ref(), payload);
+
+    store.delete_blob(&info.blob_ref).await.expect("delete_blob failed");
+    assert!(!store.exists_blob(&info.blob_ref).await.unwrap());
+}
+
+#[tokio::test]
+async fn test_memory_blobstore_contract() {
+    let store: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("mem-test"));
+    assert_blobstore_contract(store).await;
+}
+
+#[tokio::test]
+async fn test_file_blobstore_contract() {
+    let temp = tempdir().expect("tempdir failed");
+    let store: Arc<dyn BlobStore> = Arc::new(FileBlobStore::new(temp.path(), "file-test"));
+    assert_blobstore_contract(store).await;
+}
+
+#[tokio::test]
+async fn test_s3_blobstore_contract() {
+    let store_name = format!("s3-contract-{}", uuid::Uuid::new_v4().simple());
+    let store: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env(store_name));
+    assert_blobstore_contract(store).await;
+}
 
 #[tokio::test]
 async fn test_s3_blobstore_create_read_and_checksums() {
@@ -90,17 +130,4 @@ async fn test_s3_blobstore_delete_and_non_existent() {
 
     let non_existent = store.read_blob("del-store@00000000-0000-0000-0000-000000000000").await;
     assert!(non_existent.is_err());
-}
-
-#[tokio::test]
-async fn test_s3_blobstore_exists() {
-    let store_name = format!("exists-store-{}", uuid::Uuid::new_v4().simple());
-    let store = S3BlobStore::from_env(store_name);
-    store.init().await.expect("init failed");
-
-    let info = store.create_blob(b"Check existence").await.unwrap();
-    assert!(store.exists_blob(&info.blob_ref).await.unwrap());
-
-    store.delete_blob(&info.blob_ref).await.unwrap();
-    assert!(!store.exists_blob(&info.blob_ref).await.unwrap());
 }

@@ -4,7 +4,7 @@ use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
 
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 use crate::format::npm::{NpmDist, NpmPackageDocument, NpmVersionDetail};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -14,7 +14,7 @@ impl NpmEngine {
     pub async fn publish_package(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         doc: &NpmPackageDocument,
     ) -> Result<()> {
         let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "npm").await?;
@@ -141,7 +141,7 @@ impl NpmEngine {
     pub async fn get_tarball(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         path: &str,
     ) -> Result<Option<Bytes>> {
         let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {

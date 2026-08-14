@@ -2,7 +2,7 @@ use axum::http::{header, Method, Request, StatusCode};
 use nexus_repository_service_core::{service_runtime, ServiceRuntimeConfig};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::S3BlobStore,
+    blobstore::{BlobStore, S3BlobStore},
     context::NexusContextExt,
     services::{BlobStoreService, RepositoryService, SecurityService, TenantService},
 };
@@ -18,7 +18,7 @@ async fn setup_tenant_test_app() -> axum::Router {
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime connect error"));
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let blobstore = Arc::new(S3BlobStore::from_env("tenant-blobs"));
+    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("tenant-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     build_app(AppState { runtime, blobstore })

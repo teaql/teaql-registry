@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 use crate::format::cargo::{get_cargo_index_path, CargoIndexConfig, CargoIndexRecord};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -19,7 +19,7 @@ impl CargoEngine {
     pub async fn upload_crate(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         crate_name: &str,
         version: &str,
         crate_data: &[u8],
@@ -114,7 +114,7 @@ impl CargoEngine {
     pub async fn get_crate_tarball(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         crate_name: &str,
         version: &str,
     ) -> Result<Option<Bytes>> {

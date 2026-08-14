@@ -5,7 +5,8 @@ use tracing::info;
 use nexus_repository_service_core::{service_runtime_from_env, ServiceRuntime};
 use nexus_repository_service_core_workspace::{
     api::{build_app, AppState},
-    blobstore::S3BlobStore,
+    blobstore::{BlobStore, S3BlobStore},
+    context::RegistryContextExt,
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
 };
@@ -236,8 +237,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("TeaQL PostgreSQL schema verified and synchronized.");
 
     // 2. Initialize S3 Blob Store (RustFS / S3)
-    let blobstore = Arc::new(S3BlobStore::from_env("default"));
+    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("default"));
     blobstore.init().await?;
+
+    let mut runtime = runtime;
+    runtime.init_registry_context(blobstore.clone());
 
     // 3. Seed baseline initial configuration
     seed_initial_data(&runtime).await?;

@@ -4,7 +4,7 @@ use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
 use super::hosted::HostedEngine;
 use super::proxy::ProxyEngine;
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 use crate::services::RepositoryService;
 
 pub struct GroupEngine;
@@ -13,7 +13,7 @@ impl GroupEngine {
     pub async fn handle_get(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         path: &str,
     ) -> Result<Option<(Bytes, String)>> {
         // Find member repos by recipe conventions or configuration

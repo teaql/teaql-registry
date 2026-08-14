@@ -4,7 +4,7 @@ use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 use tracing::info;
 
 use super::hosted::HostedEngine;
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 
 pub struct ProxyEngine;
 
@@ -12,7 +12,7 @@ impl ProxyEngine {
     pub async fn handle_get(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         path: &str,
     ) -> Result<Option<(Bytes, String)>> {
         // 1. Check local cache first

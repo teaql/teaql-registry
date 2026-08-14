@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use bytes::Bytes;
 use hmac::{Hmac, Mac};
 use md5::Md5;
@@ -8,22 +9,9 @@ use sha2::{Digest, Sha256};
 use std::env;
 use uuid::Uuid;
 
+use super::traits::{BlobChecksums, BlobInfo, BlobStore};
+
 type HmacSha256 = Hmac<Sha256>;
-
-#[derive(Debug, Clone)]
-pub struct BlobChecksums {
-    pub sha1: String,
-    pub sha256: String,
-    pub md5: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct BlobInfo {
-    pub blob_id: String,
-    pub blob_ref: String,
-    pub size: i64,
-    pub checksums: BlobChecksums,
-}
 
 #[derive(Debug, Clone)]
 pub struct S3Config {
@@ -86,10 +74,6 @@ impl S3BlobStore {
 
     pub fn bucket(&self) -> &str {
         &self.config.bucket
-    }
-
-    pub fn store_name(&self) -> &str {
-        &self.store_name
     }
 
     fn get_object_key(&self, blob_id: &str) -> String {
@@ -197,8 +181,11 @@ impl S3BlobStore {
         let resp = req.send().await?;
         Ok(resp)
     }
+}
 
-    pub async fn init(&self) -> Result<()> {
+#[async_trait]
+impl BlobStore for S3BlobStore {
+    async fn init(&self) -> Result<()> {
         let path = format!("/{}", self.config.bucket);
         let resp = self.send_s3_request(Method::HEAD, &path, None, vec![], None).await?;
         if resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::FORBIDDEN {
@@ -211,7 +198,7 @@ impl S3BlobStore {
         Ok(())
     }
 
-    pub async fn create_blob(&self, data: &[u8]) -> Result<BlobInfo> {
+    async fn create_blob(&self, data: &[u8]) -> Result<BlobInfo> {
         let blob_id = Uuid::new_v4().to_string();
         let blob_ref = format!("{}@{}", self.store_name, blob_id);
         let object_key = self.get_object_key(&blob_id);
@@ -246,7 +233,7 @@ impl S3BlobStore {
         })
     }
 
-    pub async fn read_blob(&self, blob_ref: &str) -> Result<Bytes> {
+    async fn read_blob(&self, blob_ref: &str) -> Result<Bytes> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
@@ -260,7 +247,7 @@ impl S3BlobStore {
         Ok(bytes)
     }
 
-    pub async fn delete_blob(&self, blob_ref: &str) -> Result<()> {
+    async fn delete_blob(&self, blob_ref: &str) -> Result<()> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
@@ -273,12 +260,16 @@ impl S3BlobStore {
         Ok(())
     }
 
-    pub async fn exists_blob(&self, blob_ref: &str) -> Result<bool> {
+    async fn exists_blob(&self, blob_ref: &str) -> Result<bool> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
 
         let resp = self.send_s3_request(Method::HEAD, &path, None, vec![], None).await?;
         Ok(resp.status().is_success())
+    }
+
+    fn store_name(&self) -> &str {
+        &self.store_name
     }
 }

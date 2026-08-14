@@ -1,6 +1,10 @@
+use std::sync::Arc;
 use nexus_repository_service_core::ServiceRuntime;
 use teaql_core::{Expr, SelectQuery};
 use teaql_runtime::{RequestPolicy, RuntimeError, UserContext};
+
+use crate::blobstore::{BlobStore, BlobStoreManager, MemoryBlobStore};
+use crate::engine::RepositoryRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TenantInfo {
@@ -41,14 +45,27 @@ impl RequestPolicy for NexusTenantRequestPolicy {
     }
 }
 
-pub trait NexusContextExt {
+pub trait RegistryContextExt {
     fn set_tenant(&mut self, tenant_id: u64, tenant_name: &str);
     fn tenant_id(&self) -> u64;
     fn tenant_name(&self) -> &str;
     fn init_nexus_policy(&mut self);
+
+    fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>);
+    fn blobstore(&self) -> Arc<dyn BlobStore>;
+    fn set_blobstore_manager(&mut self, manager: BlobStoreManager);
+    fn blobstore_manager(&self) -> Option<Arc<BlobStoreManager>>;
+
+    fn set_repository_registry(&mut self, registry: RepositoryRegistry);
+    fn repository_registry(&self) -> Option<Arc<RepositoryRegistry>>;
+
+    fn init_registry_context(&mut self, blobstore: Arc<dyn BlobStore>);
 }
 
-impl NexusContextExt for ServiceRuntime {
+// Keep NexusContextExt alias for backwards compatibility
+pub use RegistryContextExt as NexusContextExt;
+
+impl RegistryContextExt for ServiceRuntime {
     fn set_tenant(&mut self, tenant_id: u64, tenant_name: &str) {
         self.insert_resource(TenantInfo {
             tenant_id,
@@ -71,5 +88,40 @@ impl NexusContextExt for ServiceRuntime {
 
     fn init_nexus_policy(&mut self) {
         self.set_request_policy(NexusTenantRequestPolicy);
+    }
+
+    fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>) {
+        self.insert_resource(BlobStoreManager::new(blobstore));
+    }
+
+    fn blobstore(&self) -> Arc<dyn BlobStore> {
+        if let Some(mgr) = self.get_resource::<BlobStoreManager>() {
+            mgr.default_store()
+        } else {
+            // Fallback in-memory store if not initialized
+            Arc::new(MemoryBlobStore::new("default"))
+        }
+    }
+
+    fn set_blobstore_manager(&mut self, manager: BlobStoreManager) {
+        self.insert_resource(manager);
+    }
+
+    fn blobstore_manager(&self) -> Option<Arc<BlobStoreManager>> {
+        self.get_resource::<BlobStoreManager>().map(|m| Arc::new(m.clone()))
+    }
+
+    fn set_repository_registry(&mut self, registry: RepositoryRegistry) {
+        self.insert_resource(registry);
+    }
+
+    fn repository_registry(&self) -> Option<Arc<RepositoryRegistry>> {
+        self.get_resource::<RepositoryRegistry>().map(|r| Arc::new(r.clone()))
+    }
+
+    fn init_registry_context(&mut self, blobstore: Arc<dyn BlobStore>) {
+        self.init_nexus_policy();
+        self.set_blobstore(blobstore);
+        self.set_repository_registry(RepositoryRegistry::new());
     }
 }

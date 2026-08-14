@@ -4,7 +4,7 @@ use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, LazyLock};
 
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 use crate::format::docker::{
     compute_sha256_digest, DOCKER_MANIFEST_V2_MEDIA_TYPE,
 };
@@ -35,7 +35,7 @@ impl DockerEngine {
     pub async fn finish_upload(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         image_name: &str,
         upload_uuid: &str,
         expected_digest: &str,
@@ -97,7 +97,7 @@ impl DockerEngine {
     pub async fn get_blob(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         image_name: &str,
         digest: &str,
     ) -> Result<Option<(Bytes, String)>> {
@@ -151,7 +151,7 @@ impl DockerEngine {
     pub async fn put_manifest(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         image_name: &str,
         reference: &str,
         manifest_data: &[u8],
@@ -230,7 +230,7 @@ impl DockerEngine {
     pub async fn get_manifest(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         image_name: &str,
         reference: &str,
     ) -> Result<Option<(Bytes, String, String)>> {

@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use nexus_repository_service_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::S3BlobStore;
+use crate::blobstore::BlobStore;
 use crate::format::gomod::GoModuleVersionInfo;
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -12,7 +12,7 @@ impl GoModEngine {
     pub async fn upload_artifact(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         module: &str,
         version: &str,
         ext: &str,
@@ -110,7 +110,7 @@ impl GoModEngine {
     pub async fn get_file(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-        blobstore: &S3BlobStore,
+        blobstore: &dyn BlobStore,
         path: &str,
     ) -> Result<Option<(Bytes, String)>> {
         let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {
