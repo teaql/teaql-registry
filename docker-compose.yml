@@ -1,0 +1,61 @@
+services:
+  teaql-registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: teaql/teaql-registry:latest
+    container_name: teaql-registry
+    ports:
+      - "8081:8081"
+    environment:
+      - TEAQL_REGISTRY_CORE_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/teaql_registry_db
+      - TEAQL_REGISTRY_CORE_DATABASE_USER=postgres
+      - TEAQL_REGISTRY_CORE_DATABASE_PASSWORD=postgres
+      - S3_ENDPOINT=http://rustfs:9000
+      - S3_ACCESS_KEY=rustfsadmin
+      - S3_SECRET_KEY=rustfsadmin
+      - S3_BUCKET=teaql-blobs
+      - S3_REGION=us-east-1
+      - PORT=8081
+      - RUST_LOG=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: teaql-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=teaql_registry_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d teaql_registry_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: teaql-rustfs
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    environment:
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+    volumes:
+      - rustfs_data:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  rustfs_data:

@@ -227,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     info!(
-        "[{}] Starting Nexus Repository Core (Rust + TeaQL)...",
+        "[{}] Starting TeaQL Registry (Rust + TeaQL)...",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
     );
 
