@@ -1,21 +1,28 @@
 # TeaQL Registry
 
-TeaQL Registry 是一个基于 Rust 与 TeaQL 框架构建的高性能、超轻量多格式制品库服务，**核心定位是为 AI 自动化流水线（Agent Loops）与高频 CI/CD 提供低延迟、无外部限流的临时中间制品高速中转与缓存中枢**。
+> **AI-Native Multi-Format Artifact Registry for AI Coding Workflows**  
+> 专为 AI Native 自动化编程工作流与高频 CI/CD 流水线设计的超轻量、低延迟多格式制品中枢。
 
 ---
 
-## 核心定位与设计目标
+## 核心定位：AI Native 编码工作流基础设施
 
-与面向长期归档和合规审计的传统大型制品库（如 JFrog / Nexus）不同，TeaQL Registry 专为高频、密集的自动化构建与验证流程设计：
+在 AI Agent 驱动的代码生成与自主验证（Agentic Coding Loops）场景中，智能体在“编写代码 -> 打包构建 -> 运行测试 -> 观察报错 -> 修正重试”的高密闭环中运行。
 
-1. **服务于 AI 自动化编程流水线（Agent Loops）**：
-   - AI 编码智能体在“生成代码 -> 构建打包 -> 测试运行 -> 修正重试”的快速闭环中，会在极短时间内产生大量微小迭代包与高密 API 请求。
-   - 本地化或集群内网部署，消除外网往返延迟（RTT 从 200ms+ 降至 1~5ms），且**无外部公有云的 API 频次限制与 WAF 风控拦截（避免 429 Too Many Requests）**。
-2. **高频 CI/CD 流水线中间制品中转**：
-   - 为跨 Stage 构建产物传递、分支构建（PR / Feature Branch）提供快速存取。
-   - 内置保留策略（Retention Policy）与垃圾回收（BlobStore GC），支持按版本数量自动淘汰临时制品，防止存储堆积。
-3. **极低资源开销与就近部署**：
-   - **单二进制 / 6.5MB 极简容器**，常驻内存仅 20MB~40MB，冷启动毫秒级，可作为 Sidecar 或集群本地服务与 CI Runner 同机部署。
+传统面向长期归档的企业级制品库（如 JFrog / Nexus）在 AI 工作流中面临重型占用、网络延迟及云端频次风控等瓶颈。TeaQL Registry 专为 **AI Native Coding Workflow** 设计：
+
+1. **规避公网风控与 API 限流（Zero Throttling & WAF Free）**：
+   - AI Agent 密集的构建发布往往在短时间内产生上千次请求，自建内网节点彻底杜绝公有云 429（Too Many Requests）或 WAF 恶意行为拦截。
+2. **毫秒级内网读写延迟（<5ms Latency）**：
+   - 本地化或容器集群内网直通传输，消除公网 200ms+ 的往返延迟，显著提升单个 AI 修复循环的执行效率。
+3. **隔离沙箱与数据防泄露（Air-Gapped Sandbox Ready）**：
+   - 适配禁止出网的 AI 执行沙箱，作为局域网内的依赖 Proxy 缓存与私有包托管中枢，保障源码与提示词安全。
+4. **多 Agent 协同构建中转（Inter-Agent Dependency Resolution）**：
+   - 支撑微服务或多模块场景下多个 AI Agent 之间传递临时 SNAPSHOT 或预编译构建产物。
+5. **针对临时制品的自动垃圾回收（Retention & GC）**：
+   - 内置保留策略与孤儿 Blob 回收，按版本数量自动清理中间实验产物，防止磁盘膨胀。
+6. **双端轻量运维支持（Web Console & TUI）**：
+   - 提供 Snowflake 风格的内嵌 Web 管理控制台，以及专为 SSH 堡垒机环境设计的 2.6MB 独立终端客户端 `registry-tui`。
 
 ---
 
@@ -32,9 +39,11 @@ TeaQL Registry 是一个基于 Rust 与 TeaQL 框架构建的高性能、超轻�
   - **Raw**：支持任意通用二进制工具链、压缩包与文档文件的直接存取。
 - **Snowflake 风格轻量 Web 控制台**：
   - 内嵌 React 19 + TypeScript 控制台，提供仓库概览、构件多维检索、一键复制包管理器安装命令、存储运维与 PAT 令牌管理。
+- **独立终端 TUI 客户端 (`registry-tui`)**：
+  - 纯 Rust 单静态二进制（2.6MB），在 SSH 堡垒机中直接查看指标、检索构件、生成临时令牌与触发 GC。
 - **自动化存储治理与垃圾回收**：
   - 支持多维保留策略（最大版本保留数、快照清理），以及底层孤儿 Blob 的物理垃圾回收。
-- **CI/CD 认证与集成**：
+- **CI/CD 与 Agent 认证集成**：
   - 支持 Personal Access Token（PAT，`tql_pat_*`）与 Webhook 事件通知，支持主流 CLI 工具免配置集成。
 - **多后端存储抽象**：
   - 支持 S3 对象存储（兼容 RustFS / MinIO / AWS S3）、本地文件系统与内存存储，底层采用 SHA-256 内容寻址自动去重。
@@ -46,6 +55,7 @@ TeaQL Registry 是一个基于 Rust 与 TeaQL 框架构建的高性能、超轻�
 ```text
 teaql-registry/
 ├── console/             # Snowflake 风格 React 19 前端控制台源码
+├── registry-tui/        # 独立终端 TUI 运维客户端源码 (registry-tui)
 ├── models/              # TeaQL 领域实体与元数据定义 (model.xml)
 ├── rust-lib-core/       # 强类型元数据操作与审计层 (teaql-registry-core)
 ├── rust-web-axum/       # 协议引擎、S3 存储流、REST API 与内嵌 UI (teaql-registry)
@@ -57,48 +67,57 @@ teaql-registry/
 
 ## 快速上手
 
-### 方式一：Docker Compose 一键启动（推荐）
+### 1. Docker Compose 一键启动（推荐）
 
 ```bash
 docker compose up -d
 ```
 
-启动完成后，系统各端点如下：
+服务就绪后，各端点如下：
 - **Web 控制台**：`http://localhost:8081/`（默认管理员账号：`admin` / `admin123`）
 - **REST API**：`http://localhost:8081/service/rest/v1/...`
 - **Prometheus 监控指标**：`http://localhost:8081/metrics`
 - **S3 对象存储（RustFS）**：`http://localhost:9010`
 
-### 方式二：发布全格式演示构件
+### 2. 使用终端 TUI 客户端（适合 SSH / 堡垒机）
+
+```bash
+# 编译或直接运行 TUI 客户端
+cargo run --release -p registry-tui
+
+# 或指定远程内网后端与访问令牌
+registry-tui --endpoint http://10.0.0.10:8081 --token tql_pat_xxx
+```
+
+### 3. 发布全格式演示构件
 
 执行自带脚本，一键向运行中的服务推送全部 8 种格式的示例包：
 ```bash
 ./demo-components/publish_all_demos.sh
 ```
 
-### 方式三：本地源码编译运行
+### 4. 本地源码编译运行
 
-1. **启动依赖存储与数据库**：
-   ```bash
-   docker compose up -d postgres rustfs
-   ```
+```bash
+# 1. 启动依赖存储与数据库
+docker compose up -d postgres rustfs
 
-2. **编译并启动后端**：
-   ```bash
-   export TEAQL_REGISTRY_CORE_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nexus_db"
-   export TEAQL_REGISTRY_CORE_DATABASE_USER="postgres"
-   export TEAQL_REGISTRY_CORE_DATABASE_PASSWORD="postgres"
-   export S3_ENDPOINT="http://127.0.0.1:9010"
-   export S3_ACCESS_KEY="rustfsadmin"
-   export S3_SECRET_KEY="rustfsadmin"
-   export S3_BUCKET="teaql-blobs"
-   export S3_REGION="us-east-1"
-   export PORT=8081
+# 2. 导出环境变量并启动
+export TEAQL_REGISTRY_CORE_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nexus_db"
+export TEAQL_REGISTRY_CORE_DATABASE_USER="postgres"
+export TEAQL_REGISTRY_CORE_DATABASE_PASSWORD="postgres"
+export S3_ENDPOINT="http://127.0.0.1:9010"
+export S3_ACCESS_KEY="rustfsadmin"
+export S3_SECRET_KEY="rustfsadmin"
+export S3_BUCKET="teaql-blobs"
+export S3_REGION="us-east-1"
+export PORT=8081
 
-   cargo run --bin teaql-registry
-   ```
+cargo run --bin teaql-registry
+```
 
-3. **运行全量测试套件**：
-   ```bash
-   cargo test -- --test-threads=1
-   ```
+### 5. 运行全量测试套件
+
+```bash
+cargo test -- --test-threads=1
+```
