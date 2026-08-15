@@ -5,6 +5,7 @@ pub mod component_service;
 pub mod gc_service;
 pub mod repository_service;
 pub mod security_service;
+pub mod seed_data;
 pub mod tenant_service;
 
 pub use asset_service::AssetService;
@@ -14,6 +15,7 @@ pub use component_service::ComponentService;
 pub use gc_service::{BlobStoreGcService, GcReport};
 pub use repository_service::RepositoryService;
 pub use security_service::SecurityService;
+pub use seed_data::seed_demo_artifacts;
 pub use tenant_service::TenantService;
 
 pub trait SaveAuditedExt<T: teaql_core::Entity + teaql_runtime::LedgerEntity> {

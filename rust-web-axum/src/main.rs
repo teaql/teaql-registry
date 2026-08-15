@@ -243,8 +243,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = runtime;
     runtime.init_registry_context(blobstore.clone());
 
-    // 3. Seed baseline initial configuration
+    // 3. Seed baseline initial configuration and sample demo artifacts
     seed_initial_data(&runtime).await?;
+    let _ = teaql_registry::services::seed_demo_artifacts(&runtime, blobstore.as_ref()).await;
 
     // 4. Assemble Axum Router
     let app_state = AppState {
