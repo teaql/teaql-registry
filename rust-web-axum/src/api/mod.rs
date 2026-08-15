@@ -8,10 +8,13 @@ pub mod pypi_registry;
 pub mod repository_content;
 pub mod rest_blobstores;
 pub mod rest_components;
+pub mod rest_governance;
 pub mod rest_repositories;
 pub mod rest_security;
 pub mod rest_status;
 pub mod rest_tenants;
+pub mod rest_tokens;
+pub mod rest_webhooks;
 pub mod search;
 
 pub use repository_content::AppState;
@@ -57,6 +60,16 @@ pub fn build_app(state: AppState) -> Router {
             "/security/anonymous",
             get(rest_security::get_anonymous_config).put(rest_security::update_anonymous_config),
         )
+        // Personal Access Tokens
+        .route("/tokens", get(rest_tokens::handle_list_tokens).post(rest_tokens::handle_create_token))
+        .route("/tokens/:id", axum::routing::delete(rest_tokens::handle_revoke_token))
+        // Webhooks
+        .route("/webhooks", get(rest_webhooks::handle_list_webhooks).post(rest_webhooks::handle_create_webhook))
+        .route("/webhooks/:id", axum::routing::delete(rest_webhooks::handle_delete_webhook))
+        .route("/webhooks/test", post(rest_webhooks::handle_test_webhook))
+        // Governance & Storage Ops
+        .route("/gc/run", post(rest_governance::handle_run_gc))
+        .route("/cleanup/run", post(rest_governance::handle_run_cleanup))
         // Components and Assets Search & Management
         .route("/components", get(rest_components::list_components))
         .route("/assets", get(rest_components::list_assets))
@@ -85,6 +98,11 @@ pub fn build_app(state: AppState) -> Router {
         );
 
     Router::new()
+        // Embedded UI Console
+        .route("/", get(crate::ui::handle_index))
+        .route("/ui", get(crate::ui::handle_index))
+        .route("/console", get(crate::ui::handle_index))
+        .route("/assets/*path", get(crate::ui::handle_assets))
         // Prometheus Metrics
         .route("/metrics", get(metrics::handle_metrics))
         // Docker Registry v2 ping & repo operations
