@@ -2,6 +2,7 @@
 members = [
     "rust-lib-core/lib",
     "rust-web-axum",
+    "registry-tui",
 ]
 resolver = "2"
 
