@@ -26,6 +26,26 @@
 
 ---
 
+## 与 Nexus / JFrog 的定位差异（互补而非替代）
+
+本项目**明确并非要替代 Sonatype Nexus 或 JFrog Artifactory**，而是与传统企业级制品库形成上下游分工与互补：
+
+| 维度 | 企业主制品库（Nexus / JFrog Artifactory） | TeaQL Registry（近端临时中转站） |
+| :--- | :--- | :--- |
+| **主要用途** | **最终正式发布（Release）与长期归档** | **AI Agent 闭环与 CI/CD 流程中的临时中间产物（Ephemeral）** |
+| **保留周期** | 长期保存、严格归档、不可变版本 | 极短生命周期（分钟级/小时级），高频生成与自动 GC 回收 |
+| **安全与治理** | 企业级 SBOM 分析、开源合规与深度漏洞扫描 | 极速流式传输、依赖 Proxy 缓存与内容寻址去重 |
+| **部署位置** | 企业集中式数据中心或 SaaS 云端 | 与 AI 沙箱、CI Runner 同机/同内网就近部署（Sidecar / Local） |
+
+```mermaid
+graph LR
+    subgraph "AI Agent & CI/CD 高频工作区"
+        A[AI 智能体 / CI Runner] -->|1. 秒级高密验证 & 临时存取| B[(TeaQL Registry 本地缓存)]
+        B -.->|2. 自动 GC 淘汰失败实验包| D[垃圾回收]
+    end
+    B -->|3. 仅在最终验证通过后同步发布正式版| C[(企业主制品库: Nexus / JFrog)]
+```
+
 ## 核心特性
 
 - **8 大主流包管理生态全覆盖**：
