@@ -6,7 +6,7 @@
 
 ## Overview & Core Positioning
 
-**TeaQL Registry** is a lightweight, low-latency, multi-format artifact and package registry written in Rust and powered by the TeaQL framework.
+**TeaQL Registry** is both a practical, AI-native artifact registry and a reference application demonstrating how TeaQL can be used to build a real-world, multi-protocol infrastructure service.
 
 It is purpose-built as an **in-cluster / local intermediate artifact exchange and caching hub for AI Coding Agents and high-throughput CI/CD pipelines**.
 
