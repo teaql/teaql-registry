@@ -61,6 +61,9 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - **Go Modules**: GOPROXY specification compliance (`.info`, `.mod`, `.zip`).
   - **NuGet (.NET)**: NuGet v3 Flat Container protocol and `dotnet nuget push`.
   - **Raw**: Arbitrary binary tools, archives, and files over HTTP.
+- **Pure In-Memory High-Performance Mode (`--memory-mode` / `MEMORY_MODE=true`)**:
+  - In-memory volatile RAM blob storage for maximum throughput with zero disk/S3 latency.
+  - **Strict Single Latest Version Retention**: Every artifact automatically evicts prior versions upon publishing a new version, preventing memory bloat in fast-paced AI agent loops.
 - **Embedded Snowflake-Style Web Console**:
   - Modern React 19 + TypeScript SPA embedded directly inside the binary (zero static file dependencies).
   - Low cognitive load, instant package manager install snippet generators, and storage metrics.
@@ -143,7 +146,19 @@ export PORT=8081
 cargo run --bin teaql-registry
 ```
 
-### 5. Run the Test Suite
+### 5. Pure In-Memory High-Performance Mode
+
+Run in ephemeral pure RAM mode (with single latest version auto-retention per artifact):
+
+```bash
+# Via CLI flag
+cargo run --bin teaql-registry -- --memory-mode
+
+# Or via environment variable
+MEMORY_MODE=true cargo run --bin teaql-registry
+```
+
+### 6. Run the Test Suite
 
 ```bash
 cargo test -- --test-threads=1

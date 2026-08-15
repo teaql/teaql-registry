@@ -5,7 +5,7 @@ use tracing::info;
 use teaql_registry_core::{service_runtime_from_env, ServiceRuntime};
 use teaql_registry::{
     api::{build_app, AppState},
-    blobstore::{BlobStore, S3BlobStore},
+    blobstore::{BlobStore, MemoryBlobStore, S3BlobStore},
     context::RegistryContextExt,
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
@@ -236,12 +236,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.ensure_schema().await?;
     info!("TeaQL PostgreSQL schema verified and synchronized.");
 
-    // 2. Initialize S3 Blob Store (RustFS / S3)
-    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("default"));
+    // 2. Initialize Blob Store (Pure In-Memory Mode or Persistent S3/RustFS)
+    let args: Vec<String> = std::env::args().collect();
+    let memory_mode = args.iter().any(|arg| arg == "--memory-mode" || arg == "--in-memory" || arg == "-m")
+        || std::env::var("MEMORY_MODE").map(|v| v == "true" || v == "1").unwrap_or(false)
+        || std::env::var("STORAGE_MODE").map(|v| v.to_lowercase() == "memory").unwrap_or(false);
+
+    let blobstore: Arc<dyn BlobStore> = if memory_mode {
+        info!(">> PURE IN-MEMORY HIGH-PERFORMANCE MODE ACTIVE: Using volatile memory blob storage with single latest version retention <<");
+        Arc::new(MemoryBlobStore::new("default"))
+    } else {
+        info!(">> PERSISTENT STORAGE MODE ACTIVE: Using S3 / RustFS blob storage <<");
+        Arc::new(S3BlobStore::from_env("default"))
+    };
     blobstore.init().await?;
 
     let mut runtime = runtime;
     runtime.init_registry_context(blobstore.clone());
+    runtime.set_memory_mode(memory_mode);
 
     // 3. Seed baseline initial configuration and sample demo artifacts
     seed_initial_data(&runtime).await?;

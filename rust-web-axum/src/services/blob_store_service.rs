@@ -92,6 +92,7 @@ impl BlobStoreService {
         let mut entity = Q::blob_store_configurations()
             .purpose("why: Create new BlobStoreConfiguration")
             .new_entity(ctx);
+        entity.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         entity.update_tenant_id(tenant_id);
         entity.update_name(name);

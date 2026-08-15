@@ -12,6 +12,11 @@ pub struct TenantInfo {
     pub tenant_name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MemoryModeConfig {
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TeaQLRegistryTenantRequestPolicy;
 
@@ -54,6 +59,9 @@ pub trait RegistryContextExt {
     fn tenant_name(&self) -> &str;
     fn init_tenant_policy(&mut self);
 
+    fn set_memory_mode(&mut self, enabled: bool);
+    fn is_memory_mode(&self) -> bool;
+
     fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>);
     fn blobstore(&self) -> Arc<dyn BlobStore>;
     fn set_blobstore_manager(&mut self, manager: BlobStoreManager);
@@ -91,6 +99,16 @@ impl RegistryContextExt for ServiceRuntime {
 
     fn init_tenant_policy(&mut self) {
         self.set_request_policy(TeaQLRegistryTenantRequestPolicy);
+    }
+
+    fn set_memory_mode(&mut self, enabled: bool) {
+        self.insert_resource(MemoryModeConfig { enabled });
+    }
+
+    fn is_memory_mode(&self) -> bool {
+        self.get_resource::<MemoryModeConfig>()
+            .map(|m| m.enabled)
+            .unwrap_or(false)
     }
 
     fn set_blobstore(&mut self, blobstore: Arc<dyn BlobStore>) {

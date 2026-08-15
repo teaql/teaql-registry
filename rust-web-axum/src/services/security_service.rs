@@ -96,6 +96,7 @@ impl SecurityService {
         let mut user = Q::security_users()
             .purpose("why: Create new user account")
             .new_entity(ctx);
+        user.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         user.update_tenant_id(tenant_id);
         user.update_username(username);
@@ -192,6 +193,7 @@ impl SecurityService {
         let mut role = Q::security_roles()
             .purpose("why: Create new security role")
             .new_entity(ctx);
+        role.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         role.update_tenant_id(tenant_id);
         role.update_role_id(role_id);
@@ -244,6 +246,7 @@ impl SecurityService {
         let mut priv_entity = Q::security_privileges()
             .purpose("why: Create new security privilege")
             .new_entity(ctx);
+        priv_entity.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         priv_entity.update_tenant_id(tenant_id);
         priv_entity.update_privilege_id(privilege_id);

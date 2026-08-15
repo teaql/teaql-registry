@@ -114,6 +114,7 @@ impl RepositoryService {
         let mut entity = Q::repository_configurations()
             .purpose("why: Create new RepositoryConfiguration")
             .new_entity(ctx);
+        entity.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         entity.update_tenant_id(tenant_id);
         entity.update_name(name);
@@ -185,6 +186,7 @@ impl RepositoryService {
         let mut cr_entity = Q::content_repositories()
             .purpose("why: Create content repository record")
             .new_entity(ctx);
+        cr_entity.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         cr_entity.update_repository_id(repo_id);
         cr_entity.update_format_name(format_name);
