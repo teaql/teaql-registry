@@ -70,7 +70,6 @@ impl TenantService {
         let mut entity = Q::tenants()
             .purpose("why: Create new tenant instance under platform")
             .new_entity(ctx);
-        entity.attach_root_recursive(teaql_runtime::EntityRoot::default());
 
         entity.update_platform_id(platform_id);
         entity.update_name(name);

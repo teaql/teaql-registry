@@ -62,8 +62,12 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - **NuGet (.NET)**: NuGet v3 Flat Container protocol and `dotnet nuget push`.
   - **Raw**: Arbitrary binary tools, archives, and files over HTTP.
 - **Pure In-Memory High-Performance Mode (`--memory-mode` / `MEMORY_MODE=true`)**:
-  - In-memory volatile RAM blob storage for maximum throughput with zero disk/S3 latency.
-  - **Strict Single Latest Version Retention**: Every artifact automatically evicts prior versions upon publishing a new version, preventing memory bloat in fast-paced AI agent loops.
+  - In-memory volatile RAM blob storage designed for specialized scenarios requiring maximum throughput and zero I/O latency.
+  - **Strict Single Latest Version Retention**: Every artifact automatically evicts prior versions upon publishing a new version to bound memory consumption.
+  - **Estimated Memory Footprint**:
+    - *Code-only dependencies (100–200 NPM/Cargo/PyPI/Go/Java modules)*: ~100MB – 300MB RAM.
+    - *Containers & binaries (30–50 microservice images / executables)*: ~1GB – 3GB RAM.
+  - **Recommendation**: For the vast majority of workflows, standard **filesystem storage** (or local S3) is the recommended default and fully sufficient, delivering sub-5ms latency via OS page cache without significant RAM overhead.
 - **Embedded Snowflake-Style Web Console**:
   - Modern React 19 + TypeScript SPA embedded directly inside the binary (zero static file dependencies).
   - Low cognitive load, instant package manager install snippet generators, and storage metrics.
@@ -148,7 +152,7 @@ cargo run --bin teaql-registry
 
 ### 5. Pure In-Memory High-Performance Mode
 
-Run in ephemeral pure RAM mode (with single latest version auto-retention per artifact):
+> **Resource Sizing & Guidance**: In-memory mode holds all binary payloads directly in RAM and consumes significantly more memory (estimated **100MB–300MB** for code packages; **1GB–3GB** if storing container images/binaries). Standard **filesystem or local S3 storage is the recommended default** for almost all workflows. Use memory mode specifically when running inside ephemeral stateless containers or when benchmarking ultra-low-latency agent loops.
 
 ```bash
 # Via CLI flag
