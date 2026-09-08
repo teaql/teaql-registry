@@ -53,7 +53,9 @@ export const ServiceLogsView: React.FC = () => {
       <div className="page-intro">
         <div>
           <h1 className="page-title">Service Logs</h1>
-          <p className="page-desc">Per-tenant audit trail for artifact upload and download operations.</p>
+          <p className="page-desc">
+            Best-effort per-tenant operational history for artifact upload and download operations.
+          </p>
         </div>
         <button className="btn btn-secondary" onClick={loadLogs} disabled={loading}>
           <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh

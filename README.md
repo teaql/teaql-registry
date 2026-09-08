@@ -113,6 +113,8 @@ teaql-registry/
 ### 1. Run with Docker Compose (Recommended)
 
 ```bash
+cp .env.example .env
+# Set POSTGRES_PASSWORD and S3_SECRET_KEY to non-empty local secrets.
 docker compose up -d
 ```
 

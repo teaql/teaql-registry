@@ -8,12 +8,12 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL=postgresql://${POSTGRES_USER:-teaql_registry}:${POSTGRES_PASSWORD:-teaql_registry_dev}@postgres:5432/${POSTGRES_DB:-teaql_registry_db}
+      - TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL=postgresql://${POSTGRES_USER:-teaql_registry}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-teaql_registry_db}
       - TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER=${POSTGRES_USER:-teaql_registry}
-      - TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD=${POSTGRES_PASSWORD:-teaql_registry_dev}
+      - TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://rustfs:9000}
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-teaql-registry}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-teaql-registry-dev}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
       - S3_BUCKET=${S3_BUCKET:-teaql-blobs}
       - S3_REGION=${S3_REGION:-us-east-1}
       - CREDENTIALS_DIR=/var/lib/teaql-registry/credentials
@@ -35,7 +35,7 @@ services:
     container_name: teaql-postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-teaql_registry}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-teaql_registry_dev}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=${POSTGRES_DB:-teaql_registry_db}
     ports:
       - "5433:5432"
@@ -56,7 +56,7 @@ services:
       - "9011:9001"
     environment:
       - RUSTFS_ACCESS_KEY=${S3_ACCESS_KEY:-teaql-registry}
-      - RUSTFS_SECRET_KEY=${S3_SECRET_KEY:-teaql-registry-dev}
+      - RUSTFS_SECRET_KEY=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
     volumes:
       - rustfs_data:/data
     restart: unless-stopped
