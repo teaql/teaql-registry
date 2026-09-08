@@ -1,68 +1,92 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
 set -euo pipefail
 
-DB_CONTAINER="teaql-current-postgres"
-REGISTRY_BIN="/home/philip/shared-cargo-target/release/teaql-registry"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REGISTRY_BIN="${REGISTRY_BIN:-${REPOSITORY_ROOT}/target/release/teaql-registry}"
+REGISTRY_PORT="${REGISTRY_PORT:-18081}"
+RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-persistent}"
+RESULTS_DIR="${BENCH_RESULTS_DIR:-${SCRIPT_DIR}/results/${RUN_ID}}"
+RUN_DIR="$(mktemp -d /tmp/teaql-registry-persistent-bench.XXXXXX)"
+SERVER_LOG="${RESULTS_DIR}/server.txt"
+MEMORY_LOG="${RESULTS_DIR}/memory.csv"
+SERVER_PID=""
+MONITOR_PID=""
 
-echo "=== Setup Persistent Mode Benchmark ==="
-# Cleanup db and old server
-pkill -x 'teaql-registry' 2>/dev/null || true
-docker exec $DB_CONTAINER psql -U postgres -c "DROP DATABASE IF EXISTS teaql_registry_bench" 2>/dev/null || true
-docker exec $DB_CONTAINER psql -U postgres -c "CREATE DATABASE teaql_registry_bench"
-rm -rf /tmp/teaql-registry-credentials /tmp/teaql-bench-server.log
+required_variables=(
+  ADMIN_PASSWORD
+  TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL
+  TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER
+  TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD
+  S3_ENDPOINT
+  S3_ACCESS_KEY
+  S3_SECRET_KEY
+  S3_BUCKET
+)
 
-# Ensure S3 bucket exists by making a dummy request or relying on S3BlobStore::init()
-# (S3BlobStore::init() creates bucket if not exist in rustfs)
-
-export TEAQL_REGISTRY_CORE_DATABASE_URL="host=127.0.0.1 port=15432 dbname=teaql_registry_bench user=postgres password=postgres"
-export TEAQL_REGISTRY_CORE_DATABASE_USER="postgres"
-export TEAQL_REGISTRY_CORE_DATABASE_PASSWORD="postgres"
-export PORT=8081
-export CREDENTIALS_DIR="/tmp/teaql-registry-credentials"
-export RUST_LOG=warn
-
-# We don't set MEMORY_MODE=true.
-nohup $REGISTRY_BIN > /tmp/teaql-bench-server.log 2>&1 &
-SERVER_PID=$!
-echo "Started server with PID $SERVER_PID"
-
-echo "Waiting for server to be ready..."
-for i in $(seq 1 30); do
-    if curl -sf http://127.0.0.1:8081/help > /dev/null 2>&1; then
-        echo "Server ready after ${i}s"
-        break
-    fi
-    sleep 1
+for variable_name in "${required_variables[@]}"; do
+  if [[ -z "${!variable_name:-}" ]]; then
+    echo "error: ${variable_name} must be set" >&2
+    exit 2
+  fi
 done
 
-# Start memory monitoring
-echo "Starting memory monitor..."
-MEM_LOG="/tmp/bench_memory.log"
-> $MEM_LOG
+if [[ ! -x "${REGISTRY_BIN}" ]]; then
+  echo "error: release binary not found at ${REGISTRY_BIN}" >&2
+  echo "hint: cargo build --release -p teaql-registry" >&2
+  exit 2
+fi
+
+cleanup() {
+  if [[ -n "${MONITOR_PID}" ]]; then kill "${MONITOR_PID}" 2>/dev/null || true; fi
+  if [[ -n "${SERVER_PID}" ]]; then kill "${SERVER_PID}" 2>/dev/null || true; fi
+  rm -rf "${RUN_DIR}"
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p "${RESULTS_DIR}"
+export PORT="${REGISTRY_PORT}"
+export CREDENTIALS_DIR="${RUN_DIR}/credentials"
+export RUST_LOG="${RUST_LOG:-warn}"
+export ALLOW_ANONYMOUS_READ=false
+export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+export TOKIO_WORKER_STACK_SIZE="${TOKIO_WORKER_STACK_SIZE:-16777216}"
+
+"${REGISTRY_BIN}" >"${SERVER_LOG}" 2>&1 &
+SERVER_PID=$!
+
+for attempt in $(seq 1 60); do
+  if curl -fsS "http://127.0.0.1:${REGISTRY_PORT}/help" >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+    echo "error: registry exited before becoming ready" >&2
+    sed -n '1,160p' "${SERVER_LOG}" >&2
+    exit 1
+  fi
+  if [[ "${attempt}" == 60 ]]; then
+    echo "error: registry did not become ready within 60 seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "recorded_at_utc,rss_kib" >"${MEMORY_LOG}"
 (
-    while kill -0 $SERVER_PID 2>/dev/null; do
-        # Record docker postgres memory (in MB)
-        PG_MEM=$(docker stats --no-stream --format "{{.MemUsage}}" $DB_CONTAINER | awk '{print $1}')
-        # Record rust registry memory (RSS in MB)
-        RUST_MEM=$(ps -o rss= -p $SERVER_PID | awk '{print $1/1024 "MiB"}')
-        echo "$(date -Iseconds) | PG: $PG_MEM | Registry: $RUST_MEM" >> $MEM_LOG
-        sleep 2
-    done
+  while kill -0 "${SERVER_PID}" 2>/dev/null; do
+    rss_kib="$(ps -o rss= -p "${SERVER_PID}" | tr -d ' ')"
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),${rss_kib:-0}" >>"${MEMORY_LOG}"
+    sleep 1
+  done
 ) &
 MONITOR_PID=$!
 
-echo "Running benchmark script..."
-# Using iteration=5 for persistent mode to save time, or 10. We will use 10.
-export CREDENTIALS_DIR="/tmp/teaql-registry-credentials"
-export BENCH_ITERATIONS=10
-bash /home/philip/githome/teaql-registry/benchmarks/run_bench.sh > /tmp/teaql-bench-persistent.log 2>&1
+REGISTRY_URL="http://127.0.0.1:${REGISTRY_PORT}" \
+  CREDENTIALS_DIR="${CREDENTIALS_DIR}" \
+  BENCH_MODE=persistent-s3 \
+  BENCH_RUN_ID="${RUN_ID}" \
+  BENCH_RESULTS_DIR="${RESULTS_DIR}" \
+  "${SCRIPT_DIR}/run_bench.sh"
 
-echo "Benchmark finished. Stopping server and monitor..."
-kill $SERVER_PID 2>/dev/null || true
-kill $MONITOR_PID 2>/dev/null || true
-
-echo "=== Memory Log Summary ==="
-cat $MEM_LOG
-
-echo "=== Result CSV ==="
-cat /tmp/teaql-bench-results.csv
+echo "Persistent benchmark evidence written to ${RESULTS_DIR}"
