@@ -131,6 +131,8 @@ async fn test_npm_registry_lifecycle() {
     let get_doc_req = Request::builder()
         .method(Method::GET)
         .uri(format!("/repository/npm-hosted/npm/{}", package_name))
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
         .body(axum::body::Body::empty())
         .unwrap();
     let get_doc_resp = app.clone().oneshot(get_doc_req).await.unwrap();
@@ -141,6 +143,13 @@ async fn test_npm_registry_lifecycle() {
     let fetched_doc: NpmPackageDocument = serde_json::from_slice(&doc_bytes).unwrap();
     assert_eq!(fetched_doc.name, package_name);
     assert_eq!(fetched_doc.dist_tags.get("latest").unwrap(), "1.0.0");
+    assert_eq!(
+        fetched_doc.versions["1.0.0"].dist.tarball,
+        format!(
+            "https://registry.example.test:7443/repository/npm-hosted/npm/{}/-/{}",
+            package_name, tarball_filename
+        )
+    );
 
     // 3. Download tarball: GET /repository/npm-hosted/npm/:package_name/-/:tarball
     let get_tgz_req = Request::builder()
@@ -327,10 +336,20 @@ async fn test_cargo_registry_lifecycle() {
     let cfg_req = Request::builder()
         .method(Method::GET)
         .uri("/repository/cargo-hosted/config.json")
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
         .body(axum::body::Body::empty())
         .unwrap();
     let cfg_resp = app.clone().oneshot(cfg_req).await.unwrap();
     assert_eq!(cfg_resp.status(), StatusCode::OK);
+    let cfg_body = axum::body::to_bytes(cfg_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let cfg: serde_json::Value = serde_json::from_slice(&cfg_body).unwrap();
+    assert_eq!(
+        cfg["dl"],
+        "https://registry.example.test:7443/repository/cargo-hosted/api/v1/crates/{crate}/{version}/download"
+    );
 
     // 2. Publish crate via PUT /repository/cargo-hosted/api/v1/crates/new
     let crate_name = format!("cr-{}", uuid::Uuid::new_v4().simple());
@@ -396,10 +415,26 @@ async fn test_nuget_registry_lifecycle() {
     let index_req = Request::builder()
         .method(Method::GET)
         .uri("/repository/nuget-hosted/v3/index.json")
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
         .body(axum::body::Body::empty())
         .unwrap();
     let index_resp = app.clone().oneshot(index_req).await.unwrap();
     assert_eq!(index_resp.status(), StatusCode::OK);
+    let index_body = axum::body::to_bytes(index_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let index: serde_json::Value = serde_json::from_slice(&index_body).unwrap();
+    assert!(index["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|resource| {
+            resource["@id"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://registry.example.test:7443/repository/nuget-hosted/")
+        }));
 
     // 2. Push NuGet package: PUT /repository/nuget-hosted/v3/package
     let fake_nupkg = b"fake-nuget-package-zip-content";

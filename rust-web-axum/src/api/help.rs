@@ -37,6 +37,7 @@ const HELP_TEXT: &str = r#"TeaQL Registry — Quick Start Guide
    BLOB_ROOT_DIR           — root path for tenant blob storage
    MEMORY_MODE=true        — enable in-memory volatile storage
    PORT                    — HTTP listen port (default: 8081)
+   PUBLIC_BASE_URL         — externally reachable URL used in package metadata
    RUST_LOG                — log level filter (default: info)
    S3_ENDPOINT             — S3-compatible storage endpoint
    S3_ACCESS_KEY           — S3 access key

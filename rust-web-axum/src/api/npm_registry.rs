@@ -16,6 +16,7 @@ pub async fn handle_npm_get_package(
     axum::extract::Extension(request): axum::extract::Extension<
         std::sync::Arc<crate::security::RequestContext>,
     >,
+    headers: HeaderMap,
     Path((repo_name, package_name)): Path<(String, String)>,
 ) -> Response {
     let repo = match RepositoryService::find_by_name(&request.runtime, &repo_name).await {
@@ -30,7 +31,11 @@ pub async fn handle_npm_get_package(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    let base_url = format!("http://localhost:8081/repository/{}", repo_name);
+    let base_url = format!(
+        "{}/repository/{}/npm",
+        crate::api::public_base_url(&headers),
+        repo_name
+    );
     match NpmEngine::get_package_document(&request.runtime, &repo, &package_name, &base_url).await {
         Ok(Some(doc)) => Json(doc).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Package not found").into_response(),

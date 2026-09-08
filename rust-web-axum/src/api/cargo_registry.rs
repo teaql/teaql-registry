@@ -13,9 +13,14 @@ use crate::services::ServiceLogService;
 
 pub async fn handle_cargo_config(
     State(_state): State<AppState>,
+    headers: HeaderMap,
     Path(repo_name): Path<String>,
 ) -> Response {
-    let repo_url = format!("http://localhost:8081/repository/{}", repo_name);
+    let repo_url = format!(
+        "{}/repository/{}",
+        crate::api::public_base_url(&headers),
+        repo_name
+    );
     let config = CargoEngine::get_config(&repo_url).await;
     Json(config).into_response()
 }

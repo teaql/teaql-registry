@@ -32,6 +32,32 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 
+pub(crate) fn public_base_url(headers: &axum::http::HeaderMap) -> String {
+    if let Ok(configured) = std::env::var("PUBLIC_BASE_URL") {
+        let configured = configured.trim().trim_end_matches('/');
+        if !configured.is_empty() {
+            return configured.to_string();
+        }
+    }
+
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| *value == "http" || *value == "https")
+        .unwrap_or("http");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(axum::http::header::HOST))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("localhost:8081");
+    format!("{scheme}://{host}")
+}
+
 pub fn build_app(state: AppState) -> Router {
     let rest_router = Router::new()
         // Tenants Management

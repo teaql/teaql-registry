@@ -13,9 +13,14 @@ use crate::services::ServiceLogService;
 
 pub async fn handle_nuget_service_index(
     State(_state): State<AppState>,
+    headers: HeaderMap,
     Path(repo_name): Path<String>,
 ) -> Response {
-    let base_url = format!("http://localhost:8081/repository/{}", repo_name);
+    let base_url = format!(
+        "{}/repository/{}",
+        crate::api::public_base_url(&headers),
+        repo_name
+    );
     let index = NuGetEngine::get_service_index(&base_url).await;
     Json(index).into_response()
 }
