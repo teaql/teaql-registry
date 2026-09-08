@@ -1,5 +1,5 @@
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
@@ -11,6 +11,15 @@ use crate::api::AppState;
 use crate::engine::DockerEngine;
 use crate::format::docker::{DockerTagList, DOCKER_MANIFEST_V2_MEDIA_TYPE};
 use crate::services::{RepositoryService, ServiceLogService};
+
+fn body_stream(body: Body) -> crate::blobstore::ByteStream {
+    use futures_util::StreamExt;
+
+    Box::pin(
+        body.into_data_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other)),
+    )
+}
 
 #[derive(Debug, Deserialize)]
 pub struct UploadQueryParams {
@@ -80,7 +89,7 @@ pub async fn handle_blob_upload_init(
     >,
     Path(name): Path<String>,
     Query(query): Query<UploadQueryParams>,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
@@ -89,19 +98,17 @@ pub async fn handle_blob_upload_init(
 
     // If monolithic upload with digest
     if let Some(digest) = query.digest {
-        let upload_uuid = DockerEngine::start_upload(&name);
-        match DockerEngine::finish_upload(
+        match DockerEngine::store_blob_stream(
             &request.runtime,
             &repo,
             &state.blobstore,
             &name,
-            &upload_uuid,
             &digest,
-            Some(&body),
+            body_stream(body),
         )
         .await
         {
-            Ok(digest_res) => {
+            Ok((digest_res, _)) => {
                 let mut headers = HeaderMap::new();
                 headers.insert(
                     header::HeaderName::from_static("docker-distribution-api-version"),
@@ -122,7 +129,19 @@ pub async fn handle_blob_upload_init(
         }
     }
 
-    let uuid = DockerEngine::start_upload(&name);
+    let uuid = match DockerEngine::start_upload(&name).await {
+        Ok(uuid) => uuid,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    let size = match DockerEngine::append_chunk(&uuid, body_stream(body)).await {
+        Ok(size) => size,
+        Err(error) => {
+            DockerEngine::cancel_upload(&uuid).await;
+            return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+        }
+    };
     let mut headers = HeaderMap::new();
     headers.insert(
         header::HeaderName::from_static("docker-distribution-api-version"),
@@ -139,7 +158,8 @@ pub async fn handle_blob_upload_init(
     );
     headers.insert(
         header::HeaderName::from_static("range"),
-        HeaderValue::from_static("0-0"),
+        HeaderValue::from_str(&format!("0-{}", size.saturating_sub(1)))
+            .expect("valid ASCII header value"),
     );
 
     (StatusCode::ACCEPTED, headers).into_response()
@@ -149,9 +169,9 @@ pub async fn handle_blob_upload_init(
 pub async fn handle_blob_upload_chunk(
     State(_state): State<AppState>,
     Path((name, uuid)): Path<(String, String)>,
-    body: Bytes,
+    body: Body,
 ) -> Response {
-    match DockerEngine::append_chunk(&uuid, &body) {
+    match DockerEngine::append_chunk(&uuid, body_stream(body)).await {
         Ok(len) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -187,11 +207,10 @@ pub async fn handle_blob_upload_finish(
     Path((name, uuid)): Path<(String, String)>,
     Query(query): Query<UploadQueryParams>,
     _headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let username = request.username.clone();
     let client_ip = request.client_ip.clone();
-    let body_size = body.len() as i64;
     let upload_path = format!("/v2/{}/blobs/uploads/{}", name, uuid);
 
     let repo = match resolve_docker_repo(&request.runtime, None).await {
@@ -213,7 +232,7 @@ pub async fn handle_blob_upload_finish(
                 &name,
                 &upload_path,
                 "docker",
-                body_size,
+                0,
                 "error",
                 &msg,
             )
@@ -224,12 +243,6 @@ pub async fn handle_blob_upload_finish(
     let repo_name = repo.name();
 
     let digest = query.digest.unwrap_or_default();
-    let extra = if body.is_empty() {
-        None
-    } else {
-        Some(body.as_ref())
-    };
-
     match DockerEngine::finish_upload(
         &request.runtime,
         &repo,
@@ -237,11 +250,11 @@ pub async fn handle_blob_upload_finish(
         &name,
         &uuid,
         &digest,
-        extra,
+        Some(body_stream(body)),
     )
     .await
     {
-        Ok(digest_res) => {
+        Ok((digest_res, body_size)) => {
             let artifact_path = format!("/v2/{}/blobs/{}", name, digest_res);
             ServiceLogService::log_event(
                 &request.runtime,
@@ -287,7 +300,7 @@ pub async fn handle_blob_upload_finish(
                 &repo_name,
                 &upload_path,
                 "docker",
-                body_size,
+                0,
                 "error",
                 &e.to_string(),
             )

@@ -7,7 +7,7 @@ use bytes::Bytes;
 use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
-    blobstore::{BlobStore, S3BlobStore},
+    blobstore::{BlobStore, MemoryBlobStore},
     format::docker::{
         compute_sha256_digest, DockerDescriptor, DockerManifestV2, DockerTagList,
         DOCKER_CONFIG_JSON_MEDIA_TYPE, DOCKER_LAYER_GZIP_MEDIA_TYPE, DOCKER_MANIFEST_V2_MEDIA_TYPE,
@@ -26,7 +26,7 @@ async fn setup_docker_test_app() -> axum::Router {
     );
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("docker-blobs"));
+    let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("docker-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();
@@ -83,8 +83,10 @@ async fn test_docker_blob_and_manifest_lifecycle() {
     let image_name = format!("testapp-{}", uuid::Uuid::new_v4().simple());
 
     // 1. Upload Layer Blob via Monolithic Upload (POST with ?digest=...)
-    let layer_data = b"fake-tar-gzip-layer-binary-content-12345";
-    let layer_digest = compute_sha256_digest(layer_data);
+    // Axum's buffered body extractor defaults to 2 MiB. Keep this payload above
+    // that boundary so the test proves Docker layers use the streaming path.
+    let layer_data = vec![0x5a_u8; 3 * 1024 * 1024];
+    let layer_digest = compute_sha256_digest(&layer_data);
 
     let init_post_req = Request::builder()
         .method(Method::POST)
@@ -92,7 +94,7 @@ async fn test_docker_blob_and_manifest_lifecycle() {
             "/v2/{}/blobs/uploads/?digest={}",
             image_name, layer_digest
         ))
-        .body(axum::body::Body::from(Bytes::from_static(layer_data)))
+        .body(axum::body::Body::from(layer_data.clone()))
         .unwrap();
     let init_post_resp = app.clone().oneshot(init_post_req).await.unwrap();
     assert_eq!(init_post_resp.status(), StatusCode::CREATED);
@@ -158,10 +160,10 @@ async fn test_docker_blob_and_manifest_lifecycle() {
         .unwrap();
     let get_blob_resp = app.clone().oneshot(get_blob_req).await.unwrap();
     assert_eq!(get_blob_resp.status(), StatusCode::OK);
-    let read_layer_bytes = axum::body::to_bytes(get_blob_resp.into_body(), 1024 * 1024)
+    let read_layer_bytes = axum::body::to_bytes(get_blob_resp.into_body(), 4 * 1024 * 1024)
         .await
         .unwrap();
-    assert_eq!(read_layer_bytes.as_ref(), layer_data);
+    assert_eq!(read_layer_bytes.as_ref(), layer_data.as_slice());
 
     // 4. Create and Upload Docker Manifest v2
     let manifest = DockerManifestV2 {

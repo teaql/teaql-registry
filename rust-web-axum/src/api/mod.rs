@@ -23,6 +23,7 @@ pub use repository_content::AppState;
 
 use crate::security::request_context::authenticate_request;
 use axum::{
+    extract::DefaultBodyLimit,
     middleware,
     routing::{get, patch, post, put},
     Router,
@@ -167,7 +168,7 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/repository/:name/pypi/upload",
-            post(pypi_registry::handle_pypi_upload),
+            post(pypi_registry::handle_pypi_upload).layer(DefaultBodyLimit::disable()),
         )
         // NuGet v3
         .route(

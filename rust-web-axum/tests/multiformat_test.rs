@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
-    blobstore::{BlobStore, S3BlobStore},
+    blobstore::{BlobStore, MemoryBlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
     services::{BlobStoreService, RepositoryService},
 };
@@ -25,7 +25,7 @@ async fn setup_multiformat_test_app() -> axum::Router {
     );
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("multi-blobs"));
+    let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("multi-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();
@@ -165,17 +165,21 @@ async fn test_pypi_registry_lifecycle() {
 
     let proj_name = format!("flask-util-{}", uuid::Uuid::new_v4().simple());
     let filename = format!("{}-2.0.0-py3-none-any.whl", proj_name);
-    let whl_content = b"fake-python-wheel-zip-content";
+    // Keep the distribution above Axum's 2 MiB buffered extractor default so
+    // this lifecycle test protects the streaming multipart implementation.
+    let whl_content = vec![0x50_u8; 3 * 1024 * 1024];
 
     // Multipart upload payload
     let boundary = "------------------------Boundary123456789";
-    let body_str = format!(
+    let mut body = format!(
         "--{0}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\n{1}\r\n\
          --{0}\r\nContent-Disposition: form-data; name=\"version\"\r\n\r\n2.0.0\r\n\
-         --{0}\r\nContent-Disposition: form-data; name=\"content\"; filename=\"{2}\"\r\nContent-Type: application/x-wheel+zip\r\n\r\n{3}\r\n\
-         --{0}--\r\n",
-        boundary, proj_name, filename, std::str::from_utf8(whl_content).unwrap()
-    );
+         --{0}\r\nContent-Disposition: form-data; name=\"content\"; filename=\"{2}\"\r\nContent-Type: application/x-wheel+zip\r\n\r\n",
+        boundary, proj_name, filename
+    )
+    .into_bytes();
+    body.extend_from_slice(&whl_content);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
     // 1. Upload distribution: POST /repository/pypi-hosted/pypi/upload
     let post_req = Request::builder()
@@ -185,7 +189,7 @@ async fn test_pypi_registry_lifecycle() {
             header::CONTENT_TYPE,
             format!("multipart/form-data; boundary={}", boundary),
         )
-        .body(axum::body::Body::from(body_str.into_bytes()))
+        .body(axum::body::Body::from(body))
         .unwrap();
     let post_resp = app.clone().oneshot(post_req).await.unwrap();
     assert_eq!(post_resp.status(), StatusCode::OK);
@@ -232,10 +236,10 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 4 * 1024 * 1024)
         .await
         .unwrap();
-    assert_eq!(dl_bytes.as_ref(), whl_content);
+    assert_eq!(dl_bytes.as_ref(), whl_content.as_slice());
 }
 
 #[tokio::test(flavor = "multi_thread")]
