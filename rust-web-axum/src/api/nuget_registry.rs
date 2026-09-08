@@ -183,11 +183,24 @@ pub async fn handle_nuget_push(
     axum::extract::Extension(request): axum::extract::Extension<
         std::sync::Arc<crate::security::RequestContext>,
     >,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Path(repo_name): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
     body: Bytes,
 ) -> Response {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let body = match crate::format::nuget::extract_nupkg(content_type, body).await {
+        Ok(body) => body,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid NuGet upload: {error}"),
+            )
+                .into_response();
+        }
+    };
     let username = request.username.clone();
     let client_ip = request.client_ip.clone();
     let size = body.len() as i64;
@@ -238,19 +251,27 @@ pub async fn handle_nuget_push(
         }
     };
 
-    let id = params
-        .get("id")
-        .map(|s| s.as_str())
-        .unwrap_or("sample-package");
-    let version = params.get("version").map(|s| s.as_str()).unwrap_or("1.0.0");
+    let (id, version) = match (params.get("id"), params.get("version")) {
+        (Some(id), Some(version)) => (id.clone(), version.clone()),
+        _ => match crate::format::nuget::read_nupkg_identity(&body) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid NuGet package: {error}"),
+                )
+                    .into_response();
+            }
+        },
+    };
     let path = format!("{}/{}", id, version);
 
     match NuGetEngine::upload_package(
         &request.runtime,
         &repo,
         &state.blobstore,
-        id,
-        version,
+        &id,
+        &version,
         &body,
     )
     .await

@@ -168,6 +168,10 @@ pub fn build_app(state: AppState) -> Router {
             get(cargo_registry::handle_cargo_config),
         )
         .route(
+            "/repository/:name/cargo/index/config.json",
+            get(cargo_registry::handle_cargo_config),
+        )
+        .route(
             "/repository/:name/api/v1/crates/:crate/:version/download",
             get(cargo_registry::handle_cargo_download),
         )
@@ -211,7 +215,11 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/repository/:name/v3/package",
-            put(nuget_registry::handle_nuget_push),
+            put(nuget_registry::handle_nuget_push).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/v3/package/",
+            put(nuget_registry::handle_nuget_push).layer(DefaultBodyLimit::disable()),
         )
         // NPM
         .route(

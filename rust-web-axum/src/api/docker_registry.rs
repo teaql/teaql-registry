@@ -26,12 +26,23 @@ pub struct UploadQueryParams {
     pub digest: Option<String>,
 }
 
-pub async fn handle_v2_ping() -> Response {
+pub async fn handle_v2_ping(
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::HeaderName::from_static("docker-distribution-api-version"),
         HeaderValue::from_static("registry/2.0"),
     );
+    if request.is_anonymous {
+        headers.insert(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static("Basic realm=\"TeaQL Registry\""),
+        );
+        return (StatusCode::UNAUTHORIZED, headers, "{}\n").into_response();
+    }
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),

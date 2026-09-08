@@ -115,6 +115,73 @@ async fn build_request_context(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
+    // Public service-discovery and health endpoints must remain reachable
+    // when anonymous repository reads are disabled. Give them a context with
+    // no repository privileges; endpoint-specific handlers (notably Docker's
+    // /v2/ handshake) can still issue the protocol-required auth challenge.
+    if authorization.is_none() && required_privilege(method, path).is_none() {
+        let tenant = resolve_tenant(&state.runtime, tenant_selector.unwrap_or("1")).await?;
+        let runtime = state
+            .request_runtime(tenant.0, &tenant.1)
+            .await
+            .map_err(internal_error)?;
+        return Ok(RequestContext {
+            runtime,
+            tenant_id: tenant.0,
+            tenant_name: tenant.1,
+            user_id: 0,
+            username: "public".to_string(),
+            client_ip,
+            privileges: HashSet::new(),
+            is_anonymous: true,
+        });
+    }
+
+    let direct_token = authorization
+        .filter(|value| parse_basic_auth(value).is_none())
+        .map(|value| value.strip_prefix("Bearer ").unwrap_or(value).trim())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            headers
+                .get("x-nuget-apikey")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        });
+    if let Some(raw_token) = direct_token {
+        let required = required_privilege(method, path).unwrap_or("");
+        let principal = TokenService::validate_token(&state.runtime, raw_token, required)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(unauthorized)?;
+        let tenant = resolve_tenant(&state.runtime, &principal.tenant_id.to_string()).await?;
+        let runtime = state
+            .request_runtime(tenant.0, &tenant.1)
+            .await
+            .map_err(internal_error)?;
+        let owner = SecurityService::find_user_by_tenant_and_username(
+            &runtime,
+            principal.tenant_id,
+            &principal.username,
+        )
+        .await
+        .map_err(internal_error)?
+        .filter(|user| user.id() == principal.user_id && user.user_status_id() == 1001)
+        .ok_or_else(unauthorized)?;
+        let scope = RequestContext {
+            runtime,
+            tenant_id: principal.tenant_id,
+            tenant_name: tenant.1,
+            user_id: owner.id(),
+            username: owner.username(),
+            client_ip,
+            privileges: principal.scopes.into_iter().collect(),
+            is_anonymous: false,
+        };
+        authorize(&scope, method, path)?;
+        return Ok(scope);
+    }
+
     let (tenant_id, tenant_name, basic_credentials) = if let Some(value) = authorization {
         if let Some((qualified_username, password)) = parse_basic_auth(value) {
             let (username, username_tenant) = split_qualified_username(&qualified_username);
@@ -123,41 +190,6 @@ async fn build_request_context(
                 .unwrap_or("1");
             let tenant = resolve_tenant(&state.runtime, selector).await?;
             (tenant.0, tenant.1, Some((username, password)))
-        } else if let Some(raw_token) = value.strip_prefix("Bearer ").map(str::trim) {
-            let principal = TokenService::validate_token(
-                &state.runtime,
-                raw_token,
-                required_privilege(method, path).unwrap_or(""),
-            )
-            .await
-            .map_err(internal_error)?
-            .ok_or_else(unauthorized)?;
-            let tenant = resolve_tenant(&state.runtime, &principal.tenant_id.to_string()).await?;
-            let runtime = state
-                .request_runtime(tenant.0, &tenant.1)
-                .await
-                .map_err(internal_error)?;
-            let owner = SecurityService::find_user_by_tenant_and_username(
-                &runtime,
-                principal.tenant_id,
-                &principal.username,
-            )
-            .await
-            .map_err(internal_error)?
-            .filter(|user| user.id() == principal.user_id && user.user_status_id() == 1001)
-            .ok_or_else(unauthorized)?;
-            let scope = RequestContext {
-                runtime,
-                tenant_id: principal.tenant_id,
-                tenant_name: tenant.1,
-                user_id: owner.id(),
-                username: owner.username(),
-                client_ip,
-                privileges: principal.scopes.into_iter().collect(),
-                is_anonymous: false,
-            };
-            authorize(&scope, method, path)?;
-            return Ok(scope);
         } else {
             return Err(unauthorized());
         }

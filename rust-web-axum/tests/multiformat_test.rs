@@ -5,6 +5,7 @@ mod common;
 use axum::http::{header, Method, Request, StatusCode};
 use base64::Engine;
 use bytes::Bytes;
+use sha2::Digest;
 use std::collections::HashMap;
 use std::sync::Arc;
 use teaql_registry::{
@@ -335,7 +336,7 @@ async fn test_cargo_registry_lifecycle() {
     // 1. Check config.json
     let cfg_req = Request::builder()
         .method(Method::GET)
-        .uri("/repository/cargo-hosted/config.json")
+        .uri("/repository/cargo-hosted/cargo/index/config.json")
         .header(header::HOST, "registry.example.test:7443")
         .header("x-forwarded-proto", "https")
         .body(axum::body::Body::empty())
@@ -350,6 +351,7 @@ async fn test_cargo_registry_lifecycle() {
         cfg["dl"],
         "https://registry.example.test:7443/repository/cargo-hosted/api/v1/crates/{crate}/{version}/download"
     );
+    assert_eq!(cfg["auth-required"], true);
 
     // 2. Publish crate via PUT /repository/cargo-hosted/api/v1/crates/new
     let crate_name = format!("cr-{}", uuid::Uuid::new_v4().simple());
@@ -389,6 +391,14 @@ async fn test_cargo_registry_lifecycle() {
         .unwrap();
     let idx_resp = app.clone().oneshot(idx_req).await.unwrap();
     assert_eq!(idx_resp.status(), StatusCode::OK);
+    let idx_body = axum::body::to_bytes(idx_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let index_record: serde_json::Value = serde_json::from_slice(&idx_body).unwrap();
+    assert_eq!(
+        index_record["cksum"],
+        hex::encode(sha2::Sha256::digest(crate_tarball))
+    );
 
     // 4. Download crate
     let dl_req = Request::builder()
@@ -440,7 +450,7 @@ async fn test_nuget_registry_lifecycle() {
     let fake_nupkg = b"fake-nuget-package-zip-content";
     let push_req = Request::builder()
         .method(Method::PUT)
-        .uri("/repository/nuget-hosted/v3/package")
+        .uri("/repository/nuget-hosted/v3/package?id=sample-package&version=1.0.0")
         .body(axum::body::Body::from(Bytes::from_static(fake_nupkg)))
         .unwrap();
     let push_resp = app.clone().oneshot(push_req).await.unwrap();
@@ -467,4 +477,62 @@ async fn test_nuget_registry_lifecycle() {
         .await
         .unwrap();
     assert_eq!(dl_bytes.as_ref(), fake_nupkg);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_nuget_native_multipart_upload_strips_envelope() {
+    use std::io::{Cursor, Write};
+    use zip::{write::SimpleFileOptions, ZipWriter};
+
+    let app = setup_multiformat_test_app().await;
+    let package_id = format!("TeaQL.Native.{}", uuid::Uuid::new_v4().simple());
+    let package_version = "1.2.3";
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    writer
+        .start_file(format!("{package_id}.nuspec"), SimpleFileOptions::default())
+        .unwrap();
+    writer
+        .write_all(
+            format!(
+                r#"<package><metadata><id>{package_id}</id><version>{package_version}</version></metadata></package>"#
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let nupkg = writer.finish().unwrap().into_inner();
+    let boundary = "teaql-nuget-native-boundary";
+    let mut multipart = format!(
+        "--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-Disposition: form-data; name=\"package\"; filename=\"{package_id}.{package_version}.nupkg\"\r\n\r\n"
+    )
+    .into_bytes();
+    multipart.extend_from_slice(&nupkg);
+    multipart.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let push = Request::builder()
+        .method(Method::PUT)
+        .uri("/repository/nuget-hosted/v3/package/")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(multipart))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(push).await.unwrap().status(),
+        StatusCode::CREATED
+    );
+
+    let id = package_id.to_ascii_lowercase();
+    let download = Request::builder()
+        .uri(format!(
+            "/repository/nuget-hosted/v3/flatcontainer/{id}/{package_version}/{id}.{package_version}.nupkg"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let downloaded = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(downloaded.as_ref(), nupkg.as_slice());
 }

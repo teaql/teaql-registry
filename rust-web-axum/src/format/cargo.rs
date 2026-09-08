@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct CargoIndexConfig {
     pub dl: String,
     pub api: String,
+    #[serde(rename = "auth-required")]
+    pub auth_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

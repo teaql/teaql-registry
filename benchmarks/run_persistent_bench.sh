@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REGISTRY_BIN="${REGISTRY_BIN:-${REPOSITORY_ROOT}/target/release/teaql-registry}"
 REGISTRY_PORT="${REGISTRY_PORT:-18081}"
+READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-180}"
 RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-persistent}"
 RESULTS_DIR="${BENCH_RESULTS_DIR:-${SCRIPT_DIR}/results/${RUN_ID}}"
 RUN_DIR="$(mktemp -d /tmp/teaql-registry-persistent-bench.XXXXXX)"
@@ -24,6 +25,11 @@ required_variables=(
   S3_SECRET_KEY
   S3_BUCKET
 )
+
+if [[ ! "${READY_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: READY_TIMEOUT_SECONDS must be a positive integer" >&2
+  exit 2
+fi
 
 for variable_name in "${required_variables[@]}"; do
   if [[ -z "${!variable_name:-}" ]]; then
@@ -56,7 +62,7 @@ export TOKIO_WORKER_STACK_SIZE="${TOKIO_WORKER_STACK_SIZE:-16777216}"
 "${REGISTRY_BIN}" >"${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 
-for attempt in $(seq 1 60); do
+for attempt in $(seq 1 "${READY_TIMEOUT_SECONDS}"); do
   if curl -fsS "http://127.0.0.1:${REGISTRY_PORT}/help" >/dev/null 2>&1; then
     break
   fi
@@ -65,8 +71,8 @@ for attempt in $(seq 1 60); do
     sed -n '1,160p' "${SERVER_LOG}" >&2
     exit 1
   fi
-  if [[ "${attempt}" == 60 ]]; then
-    echo "error: registry did not become ready within 60 seconds" >&2
+  if [[ "${attempt}" == "${READY_TIMEOUT_SECONDS}" ]]; then
+    echo "error: registry did not become ready within ${READY_TIMEOUT_SECONDS} seconds" >&2
     exit 1
   fi
   sleep 1

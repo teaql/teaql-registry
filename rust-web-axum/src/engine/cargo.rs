@@ -16,6 +16,7 @@ impl CargoEngine {
                 repo_url.trim_end_matches('/')
             ),
             api: repo_url.trim_end_matches('/').to_string(),
+            auth_required: true,
         }
     }
 
@@ -103,12 +104,24 @@ impl CargoEngine {
 
         let mut lines = Vec::new();
         for c in matching {
+            let download_path = format!(
+                "/api/v1/crates/{}/{}/download",
+                crate_name,
+                c.version_name()
+            );
+            let checksum =
+                match AssetService::find_by_path(ctx, content_repo.id(), &download_path).await? {
+                    Some(asset) => AssetService::get_asset_blob(ctx, asset.asset_blob_id())
+                        .await?
+                        .map(|blob| blob.sha256_checksum().to_string())
+                        .unwrap_or_default(),
+                    None => String::new(),
+                };
             let record = CargoIndexRecord {
                 name: crate_name.to_string(),
                 vers: c.version_name().to_string(),
                 deps: Vec::new(),
-                cksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                    .to_string(),
+                cksum: checksum,
                 features: serde_json::json!({}),
                 yanked: false,
             };

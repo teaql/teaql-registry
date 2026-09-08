@@ -53,3 +53,15 @@ kill unrelated processes, drop databases, or remove persistent blob data.
 
 The route benchmark requires standard Unix tools plus `curl`, `base64`, and
 `perl` (used only to frame the Cargo publish wire payload).
+
+## Native package-manager conformance
+
+`scripts/verify_native_clients.sh` publishes and consumes temporary packages
+with Maven, npm, Twine/pip, Cargo, Go, dotnet, and Docker. Raw storage is
+verified with authenticated HTTP because it has no ecosystem package manager.
+The script creates a one-day PAT, revokes it on exit, redacts credentials from
+retained logs, and fails on the first unsuccessful native command.
+
+Go refuses to send credentials to an HTTP `GOPROXY`. For a local HTTP-only
+run, start the Registry with `ALLOW_ANONYMOUS_READ=true`; authenticated Go
+module reads should otherwise be verified through the production HTTPS URL.
