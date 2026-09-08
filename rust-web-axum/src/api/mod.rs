@@ -97,7 +97,7 @@ pub fn build_app(state: AppState) -> Router {
         // Status
         .route("/status", get(rest_status::status_ok))
         .route("/status/writable", get(rest_status::status_writable))
-        // Service Logs (per-tenant audit trail)
+        // Service Logs (per-tenant best-effort operational history)
         .route("/service-logs", get(rest_service_logs::list_service_logs));
 
     let docker_repo_router = Router::new()

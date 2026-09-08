@@ -77,14 +77,14 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - Interactive login with password masking, connection verification before entering the UI.
   - Tabs: Overview & Metrics, Repositories, Artifact Search, Quick Ops (GC, cleanup, token generation).
 - **Per-Tenant Service Logs**:
-  - Audit trail for all artifact upload/download operations across all 8 formats.
+  - Best-effort operational history for artifact upload/download operations; it is isolated from the durable TeaQL mutation audit ledger and never blocks artifact traffic.
   - Records event time, username, client IP, action, repository, artifact path, content size, and status.
   - Two log types: `service` (user-facing operations) and `system` (internal errors).
-  - Queryable via REST API and viewable in both Web Console and TUI.
+  - Queryable via REST API and viewable in both Web Console and TUI; dropped and failed writes are exposed as Prometheus counters.
 - **Automated Lifecycle Governance & GC**:
   - Retention policies (keep latest N versions, snapshot cleanup) and physical orphaned blob deletion.
 - **CI/CD Security & Integration**:
-  - Personal Access Tokens (`tql_pat_*`) with scope enforcement and HMAC-signed webhook event delivery.
+  - Database-persisted Personal Access Tokens (`tql_pat_*`) with hashed secrets, scope enforcement, revocation, expiry, and HMAC-signed webhook event delivery.
   - Randomized admin credentials on first startup (no default passwords shipped).
 - **Multi-Tenancy**:
   - Row-level tenant isolation with automated tenant provisioning and per-tenant credential generation.

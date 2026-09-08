@@ -70,7 +70,7 @@ const HELP_TEXT: &str = r#"TeaQL Registry — Quick Start Guide
      GET    /metrics                         — Prometheus metrics
      GET    /service/rest/v1/status          — health check
 
-   Service Logs (per-tenant audit trail):
+   Service Logs (per-tenant, best-effort operational history):
      GET    /service/rest/v1/service-logs    — query logs
             ?tenant_id=<id>                  — filter by tenant
             &log_type=service|system         — filter by type

@@ -5,7 +5,10 @@ use axum::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::api::AppState;
-use crate::services::{AssetService, RepositoryService};
+use crate::services::{
+    service_log::{DROPPED_SERVICE_LOG_COUNT, FAILED_SERVICE_LOG_WRITE_COUNT},
+    AssetService, RepositoryService,
+};
 
 pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -60,6 +63,23 @@ pub async fn handle_metrics(
     body.push_str(&format!(
         "teaql_registry_storage_bytes_total {}\n",
         total_storage_bytes
+    ));
+
+    body.push_str(
+        "\n# HELP teaql_registry_service_logs_dropped_total Operational service logs dropped because the bounded writer was saturated\n",
+    );
+    body.push_str("# TYPE teaql_registry_service_logs_dropped_total counter\n");
+    body.push_str(&format!(
+        "teaql_registry_service_logs_dropped_total {}\n",
+        DROPPED_SERVICE_LOG_COUNT.load(Ordering::Relaxed)
+    ));
+    body.push_str(
+        "\n# HELP teaql_registry_service_log_write_failures_total Operational service log database write failures\n",
+    );
+    body.push_str("# TYPE teaql_registry_service_log_write_failures_total counter\n");
+    body.push_str(&format!(
+        "teaql_registry_service_log_write_failures_total {}\n",
+        FAILED_SERVICE_LOG_WRITE_COUNT.load(Ordering::Relaxed)
     ));
 
     Response::builder()

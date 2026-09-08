@@ -1,6 +1,9 @@
 use crate::services::SaveAuditedExt;
 use anyhow::{anyhow, Result};
-use std::sync::{Arc, LazyLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, LazyLock,
+};
 use teaql_core::{Entity, SmartList};
 use teaql_registry_core::{ServiceLog, ServiceRuntime, Q};
 use tokio::sync::Semaphore;
@@ -8,6 +11,8 @@ use tokio::sync::Semaphore;
 const MAX_PENDING_LOG_WRITES: usize = 256;
 static LOG_WRITE_SLOTS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(MAX_PENDING_LOG_WRITES)));
+pub static DROPPED_SERVICE_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
+pub static FAILED_SERVICE_LOG_WRITE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub struct ServiceLogService;
 
@@ -36,7 +41,7 @@ impl ServiceLogService {
 
         let mut entry = Q::service_logs()
             .comment("what: create a structured registry service log entry")
-            .purpose("why: retain auditable package operation evidence")
+            .purpose("why: retain best-effort operational package history")
             .new_entity(ctx);
 
         entry.update_tenant_id(tenant_id);
@@ -62,9 +67,9 @@ impl ServiceLogService {
         Ok(())
     }
 
-    /// Enqueue a bounded background write. Registry traffic never waits for the
-    /// audit database, and overload drops logs explicitly instead of spawning
-    /// an unbounded number of tasks.
+    /// Enqueue a bounded best-effort operational log write. Registry traffic
+    /// never waits for this database write. This stream is intentionally
+    /// isolated from the durable TeaQL mutation audit ledger.
     #[allow(clippy::too_many_arguments)]
     pub async fn log_event(
         ctx: &Arc<ServiceRuntime>,
@@ -82,6 +87,7 @@ impl ServiceLogService {
         error_message: &str,
     ) {
         let Ok(slot) = LOG_WRITE_SLOTS.clone().try_acquire_owned() else {
+            DROPPED_SERVICE_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
             tracing::warn!(
                 max_pending = MAX_PENDING_LOG_WRITES,
                 "dropping registry service log because the async writer is saturated"
@@ -120,6 +126,7 @@ impl ServiceLogService {
             )
             .await
             {
+                FAILED_SERVICE_LOG_WRITE_COUNT.fetch_add(1, Ordering::Relaxed);
                 tracing::warn!(%error, "failed to write registry service log");
             }
         });
@@ -154,7 +161,7 @@ impl ServiceLogService {
             .order_by_id_desc()
             .offset(offset as u64, limit as u64)
             .comment("what: query registry service logs with bounded pagination")
-            .purpose("why: render auditable package operation history")
+            .purpose("why: render best-effort operational package history")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to query service logs: {}", e))?;
