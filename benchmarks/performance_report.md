@@ -1,58 +1,59 @@
-# TeaQL Registry 内网性能测试报告
+# TeaQL Registry performance evidence
 
-## 1. 测试环境
-- **部署环境**：单机内网环境
-- **存储模式**：
-  - 纯内存模式（Memory Mode）
-  - 永久存储模式（Persistent Mode，基于内置 S3/MinIO 存储，PostgreSQL 作为元数据引擎）
-- **测试工具**：基于 `curl` 的自动化测试脚本（重复测试 10 次取平均值）
+This report describes the retained candidate-build benchmark from
+`results/20260909-persistent-s3/`. It replaces the earlier manually summarized
+numbers, which did not retain raw samples for every claimed protocol.
 
-## 2. 内存消耗表现
-在运行并发上传和下载的高压基准测试期间，监控了服务端组件的内存占用情况，数据表现如下：
+## Scope and environment
 
-- **PostgreSQL 容器消耗**：内存占用非常稳定，始终维持在 **~72 MiB** 左右。
-- **TeaQL Registry (Rust 服务)**：
-  - 空闲状态：约 **23 MiB** 
-  - 高压上传期间（如 50MB Docker 分块上传）：峰值达到约 **232 MiB**
-  - 垃圾回收及释放：高压结束后内存快速回落到 **~30 MiB - 80 MiB** 区间
-这说明 Rust 服务在处理大文件流时内存管理良好，未出现内存泄漏，常驻内存占用极低。
+- Commit: `1f2f8517d7afe0a9bcdab5494dc67232125d09e8`
+- Worktree at test start: clean
+- Recorded: 2026-09-08 16:50:43 UTC
+- Host: Linux 6.8.0-136-generic, Intel Core i7-10750H
+- Metadata: local PostgreSQL 16 container
+- Blob data: local S3-compatible RustFS over HTTP
+- Registry: optimized release build with operational log level `warn`
+- Samples: 5 iterations for every operation
+- Client: curl 7.81.0
 
-## 3. 测试结果 (纯内存模式)
-此模式下，Blob 存储被直接重定向到易失性内存，延迟最低。
+The route benchmark measures authenticated Registry HTTP endpoints. It does
+not claim package-manager startup or dependency-resolution performance. Native
+publish/consume compatibility is covered independently under
+`../evidence/native-clients/20260909-native-clients/`.
 
-| 制品类型 | 操作 | 样本大小 | 平均耗时 (ms) | 最小/最大耗时 (ms) | 估算吞吐 (Mbps) |
-|---|---|---|---|---|---|
-| Maven2 | 上传 | 5.00 MB | 41 | 31 / 51 | 975.6 |
-| Maven2 | 下载 | 5.00 MB | 1 | 1 / 2 | 40000.0 |
-| Docker | 上传 | 50.00 MB | 1512 | 1423 / 1654 | 264.6 |
-| Docker | 下载 | 50.00 MB | 65 | 40 / 124 | 6153.8 |
-| NPM | 上传 | 2.00 MB | 47 | 42 / 57 | 340.4 |
-| NPM | 下载 | 2.00 MB | 4 | 3 / 14 | 4000.0 |
-| GoMod | 上传 | 0.50 MB | 20 | 17 / 28 | 200.0 |
-| GoMod | 下载 | 0.50 MB | 3 | 2 / 5 | 1333.3 |
-| Raw | 上传 | 10.00 MB | 264 | 173 / 332 | 303.0 |
-| Raw | 下载 | 10.00 MB | 6 | 6 / 8 | 13333.3 |
+## Results
 
-## 4. 测试结果 (永久存储模式)
-此模式下，Blob 被持久化写入内置 S3 存储引擎。
+| Format | Operation | Payload | Average | Min / max | Throughput |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Maven | upload | 5 MiB | 275.951 ms | 240.785 / 307.782 ms | 152.0 Mbps |
+| Maven | download | 5 MiB | 78.461 ms | 60.237 / 105.465 ms | 534.6 Mbps |
+| Docker | upload | 50 MiB | 2,056.845 ms | 1,920.769 / 2,331.281 ms | 203.9 Mbps |
+| Docker | download | 50 MiB | 270.331 ms | 203.748 / 352.570 ms | 1,551.5 Mbps |
+| npm | upload | 1 MiB | 133.882 ms | 99.700 / 188.036 ms | 62.7 Mbps |
+| npm | download | 1 MiB | 49.123 ms | 46.127 / 53.454 ms | 170.8 Mbps |
+| PyPI | upload | 3 MiB | 222.944 ms | 206.851 / 251.798 ms | 112.9 Mbps |
+| PyPI | download | 3 MiB | 65.906 ms | 60.797 / 78.061 ms | 381.8 Mbps |
+| Cargo | upload | 1 MiB | 129.787 ms | 117.013 / 154.117 ms | 64.6 Mbps |
+| Cargo | download | 1 MiB | 56.503 ms | 54.806 / 59.750 ms | 148.5 Mbps |
+| GoMod | upload | 0.5 MiB | 113.256 ms | 85.956 / 147.885 ms | 37.0 Mbps |
+| GoMod | download | 0.5 MiB | 53.890 ms | 38.533 / 64.878 ms | 77.8 Mbps |
+| NuGet | upload | 1 MiB | 119.033 ms | 105.961 / 134.623 ms | 70.5 Mbps |
+| NuGet | download | 1 MiB | 77.097 ms | 66.260 / 85.261 ms | 108.8 Mbps |
+| Raw | upload | 10 MiB | 508.696 ms | 419.622 / 688.240 ms | 164.9 Mbps |
+| Raw | download | 10 MiB | 92.902 ms | 72.919 / 113.462 ms | 902.9 Mbps |
 
-| 制品类型 | 操作 | 样本大小 | 平均耗时 (ms) | 最小/最大耗时 (ms) | 估算吞吐 (Mbps) |
-|---|---|---|---|---|---|
-| Maven2 | 上传 | 5.00 MB | 27 | 22 / 33 | 1481.5 |
-| Maven2 | 下载 | 5.00 MB | 1 | 1 / 1 | 40000.0 |
-| Docker | 上传 | 50.00 MB | 2785 | 2545 / 3059 | 143.6 |
-| Docker | 下载 | 50.00 MB | 133 | 72 / 209 | 3007.5 |
-| NPM | 上传 | 2.00 MB | 107 | 90 / 123 | 149.5 |
-| NPM | 下载 | 2.00 MB | 5 | 5 / 8 | 3200.0 |
-| GoMod | 上传 | 0.50 MB | 35 | 32 / 43 | 114.3 |
-| GoMod | 下载 | 0.50 MB | 3 | 3 / 4 | 1333.3 |
-| Raw | 上传 | 10.00 MB | 484 | 453 / 532 | 165.3 |
-| Raw | 下载 | 10.00 MB | 31 | 25 / 41 | 2580.6 |
+Registry RSS ranged from 39.6 MiB to 221.2 MiB during this run. The 50 MiB
+Docker transfer was the largest payload. These numbers describe this machine
+and local topology only; they are not generalized production capacity claims.
 
-> 注：测试脚本采用简单的 `PUT` 方式直接写入导致部分复杂的包规范（PyPI、Cargo、NuGet 涉及 Multipart 等规范）服务端出现预期内的拒绝，故这三者的实际吞吐暂未计入表格，后续可通过自动化端到端测试工具作补充。
+## Evidence and reproduction
 
-## 5. 数据分析
+- `summary.csv`: aggregate values shown above
+- `samples.csv`: every HTTP status and raw curl duration
+- `environment.txt`: exact commit, cleanliness, host, tools, and payload hashes
+- `memory.csv`: one-second RSS observations
+- `server.txt`: server output for the run
 
-1. **读取性能惊艳**：无论纯内存模式还是永久存储模式，5MB 的 Maven 下载耗时均在 1ms 左右。即便是基于 S3 的持久化层，在内网环境下也没有增加太多可感知的读取延迟。
-2. **写入性能可靠**：相较于纯内存模式，永久存储模式在写入上仅增加了约一倍的耗时（如 Docker 50MB 上传由 1.5s 增至 2.7s），但仍稳定保持在百兆以上吞吐水平，足以满足日常高频 CI/CD 流水线构建时的拉取和推送需求。
-3. **极低资源开销**：在满足千兆级网络吞吐的同时，核心进程内存占用最高仅二百余兆且能极快回放，整体基础架构轻量高效。
+Reproduce with the commands and required environment documented in
+`README.md`. Every non-2xx response fails the benchmark; failed requests are
+never converted to zero-duration samples.

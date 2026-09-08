@@ -1,0 +1,3 @@
+2026-09-08T16:50:41.976017Z  WARN teaql_registry: ⚠ Initial tenant credentials written to: /tmp/teaql-registry-persistent-bench.u7RmkI/credentials
+  Read /tmp/teaql-registry-persistent-bench.u7RmkI/credentials/all-credentials.txt for all passwords.
+  Keep this directory private and persistent; deleting it removes the retained bootstrap secrets.
