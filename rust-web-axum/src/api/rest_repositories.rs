@@ -43,8 +43,13 @@ pub struct ProxyConfigXO {
     pub metadata_max_age: Option<i64>,
 }
 
-pub async fn list_repositories(State(state): State<AppState>) -> Response {
-    match RepositoryService::list(&state.runtime).await {
+pub async fn list_repositories(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match RepositoryService::list(&request.runtime).await {
         Ok(repos) => {
             let items: Vec<RepositoryItemXO> = repos
                 .into_iter()
@@ -77,10 +82,13 @@ pub async fn list_repositories(State(state): State<AppState>) -> Response {
 }
 
 pub async fn get_repository(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((_format, _type, name)): Path<(String, String, String)>,
 ) -> Response {
-    match RepositoryService::find_by_name(&state.runtime, &name).await {
+    match RepositoryService::find_by_name(&request.runtime, &name).await {
         Ok(Some(r)) => {
             let format = if r.recipe_name().contains("maven") {
                 "maven2"
@@ -109,22 +117,22 @@ pub async fn get_repository(
 }
 
 pub async fn create_repository(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((format, r_type)): Path<(String, String)>,
     Json(payload): Json<CreateRepositoryRequest>,
 ) -> Response {
     let recipe_name = format!("{}-{}", format, r_type);
-    let remote_url = payload
-        .proxy
-        .and_then(|p| p.remote_url)
-        .unwrap_or_default();
+    let remote_url = payload.proxy.and_then(|p| p.remote_url).unwrap_or_default();
     let write_policy = payload
         .storage
         .and_then(|s| s.write_policy)
         .unwrap_or_else(|| "ALLOW_WRITE".to_string());
 
     match RepositoryService::create(
-        &state.runtime,
+        &request.runtime,
         &payload.name,
         &recipe_name,
         &r_type,

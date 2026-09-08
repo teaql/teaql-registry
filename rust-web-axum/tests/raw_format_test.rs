@@ -1,10 +1,15 @@
+#![recursion_limit = "256"]
+
 use teaql_registry::format::raw::sanitize_raw_path;
 
 #[test]
 fn test_sanitize_raw_path_leading_slashes() {
     assert_eq!(sanitize_raw_path("file.txt"), "/file.txt");
     assert_eq!(sanitize_raw_path("/file.txt"), "/file.txt");
-    assert_eq!(sanitize_raw_path("///nested/dir/app.zip"), "/nested/dir/app.zip");
+    assert_eq!(
+        sanitize_raw_path("///nested/dir/app.zip"),
+        "/nested/dir/app.zip"
+    );
 }
 
 #[test]

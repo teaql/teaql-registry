@@ -1,9 +1,7 @@
-use anyhow::{anyhow, Result};
-use teaql_registry_core::{
-    Asset, AssetBlob, Q, ServiceRuntime,
-};
-use teaql_core::{Entity, SmartList};
 use crate::services::SaveAuditedExt;
+use anyhow::{anyhow, Result};
+use teaql_core::{Entity, SmartList};
+use teaql_registry_core::{Asset, AssetBlob, ServiceRuntime, Q};
 
 pub struct AssetService;
 
@@ -18,8 +16,8 @@ impl AssetService {
             .filter_by_content_repository(content_repo_id)
             .with_path_is(path)
             .limit(1)
-            .comment("what: Load asset by content repository and path")
-            .purpose("why: Serve or check asset existence")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find asset: {}", e))?;
@@ -45,8 +43,8 @@ impl AssetService {
             .select_self_fields()
             .filter_by_content_repository(content_repo_id)
             .offset(offset, limit)
-            .comment("what: Load assets for content repository")
-            .purpose("why: REST assets query API")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list assets: {}", e))?;
@@ -63,16 +61,13 @@ impl AssetService {
         Ok(smart_list.into_iter().collect())
     }
 
-    pub async fn list_by_component(
-        ctx: &ServiceRuntime,
-        component_id: u64,
-    ) -> Result<Vec<Asset>> {
+    pub async fn list_by_component(ctx: &ServiceRuntime, component_id: u64) -> Result<Vec<Asset>> {
         let rows = Q::assets()
             .select_self_fields()
             .with_component_id_is(component_id)
             .limit(1000)
-            .comment("what: List assets for component")
-            .purpose("why: List assets for component")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list assets by component: {}", e))?;
@@ -89,17 +84,16 @@ impl AssetService {
         kind: &str,
     ) -> Result<Asset> {
         let mut asset = Q::assets()
-            .purpose("why: Create new asset record")
+            .comment("what: create registry asset metadata")
+            .purpose("why: persist package content and integrity records")
             .new_entity(ctx);
-        asset.attach_root_recursive(teaql_runtime::EntityRoot::default());
-
         asset.update_content_repository_id(content_repo_id);
         asset.update_component_id(component_id);
         asset.update_asset_blob_id(asset_blob_id);
         asset.update_path(path);
         asset.update_kind(kind);
 
-        asset.clone()
+        let asset = asset
             .audit_as("Creating new asset record")
             .save_with(ctx)
             .await
@@ -108,6 +102,7 @@ impl AssetService {
         Ok(asset)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_asset_blob(
         ctx: &ServiceRuntime,
         blob_store_id: u64,
@@ -119,10 +114,9 @@ impl AssetService {
         md5: &str,
     ) -> Result<AssetBlob> {
         let mut blob = Q::asset_blobs()
-            .purpose("why: Create new asset blob record")
+            .comment("what: create registry asset metadata")
+            .purpose("why: persist package content and integrity records")
             .new_entity(ctx);
-        blob.attach_root_recursive(teaql_runtime::EntityRoot::default());
-
         blob.update_blob_store_id(blob_store_id);
         blob.update_blob_ref(blob_ref);
         blob.update_blob_size(size);
@@ -131,7 +125,7 @@ impl AssetService {
         blob.update_sha256_checksum(sha256);
         blob.update_md5_checksum(md5);
 
-        blob.clone()
+        let blob = blob
             .audit_as("Creating asset blob record")
             .save_with(ctx)
             .await
@@ -140,16 +134,13 @@ impl AssetService {
         Ok(blob)
     }
 
-    pub async fn get_asset_blob(
-        ctx: &ServiceRuntime,
-        blob_id: u64,
-    ) -> Result<Option<AssetBlob>> {
+    pub async fn get_asset_blob(ctx: &ServiceRuntime, blob_id: u64) -> Result<Option<AssetBlob>> {
         let rows = Q::asset_blobs()
             .select_self_fields()
             .with_id_is(blob_id)
             .limit(1)
-            .comment("what: Load asset blob by id")
-            .purpose("why: Fetch blob metadata for download")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to load asset blob: {}", e))?;
@@ -169,21 +160,24 @@ impl AssetService {
         let rows = Q::asset_blobs()
             .select_self_fields()
             .limit(10000)
-            .comment("what: List all asset blobs")
-            .purpose("why: List all asset blobs for metrics and GC")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list all asset blobs: {}", e))?;
 
-        Ok(rows.into_iter().filter(|b| !b.blob_ref().is_empty() && b.blob_size() > 0).collect())
+        Ok(rows
+            .into_iter()
+            .filter(|b| !b.blob_ref().is_empty() && b.blob_size() > 0)
+            .collect())
     }
 
     pub async fn list_all_assets(ctx: &ServiceRuntime) -> Result<Vec<Asset>> {
         let rows = Q::assets()
             .select_self_fields()
             .limit(10000)
-            .comment("what: List all assets")
-            .purpose("why: List all assets for metrics and GC")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list all assets: {}", e))?;
@@ -196,14 +190,13 @@ impl AssetService {
             .select_self_fields()
             .with_id_is(asset_id)
             .limit(1)
-            .comment("what: Find asset to delete")
-            .purpose("why: Find asset to delete")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find asset for delete: {}", e))?;
 
         if let Some(mut asset) = rows.into_iter().next() {
-            asset.attach_root_recursive(teaql_runtime::EntityRoot::default());
             asset.update_path("");
             let _ = asset.audit_as("Deleting asset").save_with(ctx).await?;
         }
@@ -215,14 +208,13 @@ impl AssetService {
             .select_self_fields()
             .with_id_is(blob_id)
             .limit(1)
-            .comment("what: Find asset blob to delete")
-            .purpose("why: Find asset blob to delete")
+            .comment("what: query registry asset metadata")
+            .purpose("why: resolve package content and integrity records")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find asset blob for delete: {}", e))?;
 
         if let Some(mut blob) = rows.into_iter().next() {
-            blob.attach_root_recursive(teaql_runtime::EntityRoot::default());
             blob.update_blob_ref("");
             blob.update_blob_size(0);
             let _ = blob.audit_as("Deleting asset blob").save_with(ctx).await?;
@@ -241,14 +233,13 @@ impl AssetService {
         let existing = Self::find_by_path(ctx, content_repo_id, path).await?;
 
         if let Some(mut asset) = existing {
-            asset.attach_root_recursive(teaql_runtime::EntityRoot::default());
             asset.update_kind(kind);
             if let Some(cid) = component_id {
                 asset.update_component_id(cid);
             }
             asset.update_asset_blob_id(asset_blob_id);
 
-            asset.clone()
+            let asset = asset
                 .audit_as("Updating existing asset record")
                 .save_with(ctx)
                 .await
@@ -258,17 +249,16 @@ impl AssetService {
         }
 
         let mut asset = Q::assets()
-            .purpose("why: Create new asset record")
+            .comment("what: create registry asset metadata")
+            .purpose("why: persist package content and integrity records")
             .new_entity(ctx);
-        asset.attach_root_recursive(teaql_runtime::EntityRoot::default());
-
         asset.update_content_repository_id(content_repo_id);
         asset.update_component_id(component_id.unwrap_or(0));
         asset.update_asset_blob_id(asset_blob_id);
         asset.update_path(path);
         asset.update_kind(kind);
 
-        asset.clone()
+        let asset = asset
             .audit_as("Creating new asset record")
             .save_with(ctx)
             .await

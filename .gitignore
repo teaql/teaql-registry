@@ -30,3 +30,8 @@ blobs/
 .idea/
 .vscode/
 *.iml
+
+# Local environment overrides
+.env
+.env.local
+.env.*.local

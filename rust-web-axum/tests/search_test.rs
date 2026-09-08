@@ -1,24 +1,24 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::{Method, Request, StatusCode};
 use std::sync::Arc;
 use tower::ServiceExt;
 
 use teaql_registry::api::{build_app, AppState};
 use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry_core::service_runtime;
 
 async fn setup_search_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime error"));
     runtime.ensure_schema().await.expect("Schema error");
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("search-store"));
     blobstore.init().await.expect("Blobstore init error");
 
-    build_app(AppState { runtime, blobstore })
+    build_app(AppState::new(runtime, blobstore))
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -34,7 +34,9 @@ async fn test_search_components_and_assets() {
 
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json.get("items").is_some());
     assert!(json.get("total").is_some());

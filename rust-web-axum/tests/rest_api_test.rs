@@ -1,21 +1,21 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::{header, Method, Request, StatusCode};
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use serde_json::json;
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
 };
-use serde_json::json;
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
 
 async fn setup_rest_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("connect error"));
     runtime.ensure_schema().await.expect("schema error");
 
@@ -62,7 +62,7 @@ async fn setup_rest_test_app() -> axum::Router {
         .unwrap();
     }
 
-    build_app(AppState { runtime, blobstore })
+    build_app(AppState::new(runtime, blobstore))
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -215,7 +215,8 @@ async fn test_rest_security_endpoints() {
         .uri("/service/rest/v1/security/anonymous")
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(
-            json!({"enabled": true, "userId": "anonymous", "realmName": "NexusAuthorizingRealm"}).to_string(),
+            json!({"enabled": true, "userId": "anonymous", "realmName": "NexusAuthorizingRealm"})
+                .to_string(),
         ))
         .unwrap();
     let anon_put_resp = app.oneshot(anon_put).await.unwrap();

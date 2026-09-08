@@ -11,16 +11,17 @@ name = "teaql-registry"
 path = "src/main.rs"
 
 [dependencies]
-teaql_registry_core = { package = "teaql-registry-core", path = "../rust-lib-core/lib" }
+teaql_registry_core = { package = "teaql-registry-service-core", path = "../rust-lib-core/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
-teaql-core = "4.2.12"
-teaql-runtime = "4.2.12"
-teaql-data-service = "4.2.12"
-teaql-provider-postgres = "4.2.12"
+tokio-util = { version = "0.7", features = ["io"] }
+teaql-core = "4.3.3"
+teaql-runtime = "4.3.3"
+teaql-data-service = "4.3.3"
+teaql-provider-postgres = "4.3.3"
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.7", features = ["multipart", "macros"] }
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["trace", "cors"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "limit"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.8", features = ["v4", "serde"] }
@@ -43,6 +44,11 @@ regex = "1.10"
 hmac = "0.12.1"
 rust-embed = "8.5"
 mime_guess = "2.0"
+zxcvbn = "3"
+rand = "0.8"
+argon2 = "0.5"
+deadpool-postgres = "0.14"
+tokio-postgres = "0.7"
 
 [dev-dependencies]
 tempfile = "3.10"

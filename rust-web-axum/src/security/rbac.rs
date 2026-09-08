@@ -34,7 +34,10 @@ impl RbacChecker {
         repository_name: &str,
         action: &str,
     ) -> bool {
-        let required = format!("nx-repository-view-{}-{}-{}", format, repository_name, action);
+        let required = format!(
+            "nx-repository-view-{}-{}-{}",
+            format, repository_name, action
+        );
         self.has_privilege(&required)
     }
 }
@@ -44,10 +47,7 @@ pub fn match_wildcard(pattern: &str, target: &str) -> bool {
         return true;
     }
 
-    let regex_pattern = format!(
-        "^{}$",
-        regex::escape(pattern).replace(r"\*", ".*")
-    );
+    let regex_pattern = format!("^{}$", regex::escape(pattern).replace(r"\*", ".*"));
 
     if let Ok(re) = regex::Regex::new(&regex_pattern) {
         re.is_match(target)

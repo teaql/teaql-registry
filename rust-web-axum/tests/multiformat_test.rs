@@ -1,24 +1,28 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::{header, Method, Request, StatusCode};
 use base64::Engine;
 use bytes::Bytes;
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use std::collections::HashMap;
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
     services::{BlobStoreService, RepositoryService},
 };
-use std::collections::HashMap;
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
 
 async fn setup_multiformat_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
-    let runtime = Arc::new(service_runtime(config).await.expect("Runtime connect error"));
+    let config = common::runtime_config();
+    let runtime = Arc::new(
+        service_runtime(config)
+            .await
+            .expect("Runtime connect error"),
+    );
     runtime.ensure_schema().await.expect("Schema init error");
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("multi-blobs"));
@@ -60,7 +64,7 @@ async fn setup_multiformat_test_app() -> axum::Router {
         }
     }
 
-    build_app(AppState { runtime, blobstore })
+    build_app(AppState::new(runtime, blobstore))
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -81,7 +85,10 @@ async fn test_npm_registry_lifecycle() {
             description: Some("UI Library".to_string()),
             dist: NpmDist {
                 shasum: "fake-sha1".to_string(),
-                tarball: format!("http://localhost:8081/repository/npm-hosted/npm/{}/-/{}", package_name, tarball_filename),
+                tarball: format!(
+                    "http://localhost:8081/repository/npm-hosted/npm/{}/-/{}",
+                    package_name, tarball_filename
+                ),
                 integrity: None,
             },
         },
@@ -128,7 +135,9 @@ async fn test_npm_registry_lifecycle() {
         .unwrap();
     let get_doc_resp = app.clone().oneshot(get_doc_req).await.unwrap();
     assert_eq!(get_doc_resp.status(), StatusCode::OK);
-    let doc_bytes = axum::body::to_bytes(get_doc_resp.into_body(), 1024 * 1024).await.unwrap();
+    let doc_bytes = axum::body::to_bytes(get_doc_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let fetched_doc: NpmPackageDocument = serde_json::from_slice(&doc_bytes).unwrap();
     assert_eq!(fetched_doc.name, package_name);
     assert_eq!(fetched_doc.dist_tags.get("latest").unwrap(), "1.0.0");
@@ -136,12 +145,17 @@ async fn test_npm_registry_lifecycle() {
     // 3. Download tarball: GET /repository/npm-hosted/npm/:package_name/-/:tarball
     let get_tgz_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/npm-hosted/npm/{}/-/{}", package_name, tarball_filename))
+        .uri(format!(
+            "/repository/npm-hosted/npm/{}/-/{}",
+            package_name, tarball_filename
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let get_tgz_resp = app.clone().oneshot(get_tgz_req).await.unwrap();
     assert_eq!(get_tgz_resp.status(), StatusCode::OK);
-    let tgz_bytes = axum::body::to_bytes(get_tgz_resp.into_body(), 1024 * 1024).await.unwrap();
+    let tgz_bytes = axum::body::to_bytes(get_tgz_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(tgz_bytes.as_ref(), fake_tgz_data);
 }
 
@@ -167,7 +181,10 @@ async fn test_pypi_registry_lifecycle() {
     let post_req = Request::builder()
         .method(Method::POST)
         .uri("/repository/pypi-hosted/pypi/upload")
-        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={}", boundary))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
         .body(axum::body::Body::from(body_str.into_bytes()))
         .unwrap();
     let post_resp = app.clone().oneshot(post_req).await.unwrap();
@@ -181,7 +198,13 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let root_resp = app.clone().oneshot(root_req).await.unwrap();
     assert_eq!(root_resp.status(), StatusCode::OK);
-    let root_html = String::from_utf8(axum::body::to_bytes(root_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let root_html = String::from_utf8(
+        axum::body::to_bytes(root_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(root_html.contains(&format!("{}/", proj_name)));
 
     // 3. Simple Package Index: GET /repository/pypi-hosted/simple/:project/
@@ -192,7 +215,13 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let pkg_resp = app.clone().oneshot(pkg_req).await.unwrap();
     assert_eq!(pkg_resp.status(), StatusCode::OK);
-    let pkg_html = String::from_utf8(axum::body::to_bytes(pkg_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let pkg_html = String::from_utf8(
+        axum::body::to_bytes(pkg_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(pkg_html.contains(&filename));
 
     // 4. Download distribution: GET /repository/pypi-hosted/packages/:filename
@@ -203,7 +232,9 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), whl_content);
 }
 
@@ -218,7 +249,10 @@ async fn test_gomod_registry_lifecycle() {
     // 1. Upload go.mod and .zip
     let put_mod_req = Request::builder()
         .method(Method::PUT)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod",
+            module
+        ))
         .body(axum::body::Body::from(Bytes::from_static(mod_content)))
         .unwrap();
     let put_mod_resp = app.clone().oneshot(put_mod_req).await.unwrap();
@@ -226,7 +260,10 @@ async fn test_gomod_registry_lifecycle() {
 
     let put_zip_req = Request::builder()
         .method(Method::PUT)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.zip", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.zip",
+            module
+        ))
         .body(axum::body::Body::from(Bytes::from_static(zip_content)))
         .unwrap();
     let put_zip_resp = app.clone().oneshot(put_zip_req).await.unwrap();
@@ -240,13 +277,22 @@ async fn test_gomod_registry_lifecycle() {
         .unwrap();
     let list_resp = app.clone().oneshot(list_req).await.unwrap();
     assert_eq!(list_resp.status(), StatusCode::OK);
-    let list_txt = String::from_utf8(axum::body::to_bytes(list_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let list_txt = String::from_utf8(
+        axum::body::to_bytes(list_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(list_txt.contains("v1.0.0"));
 
     // 3. Query @v/v1.0.0.info
     let info_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.info", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.info",
+            module
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let info_resp = app.clone().oneshot(info_req).await.unwrap();
@@ -255,12 +301,17 @@ async fn test_gomod_registry_lifecycle() {
     // 4. Download @v/v1.0.0.mod & zip
     let dl_mod_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod",
+            module
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let dl_mod_resp = app.clone().oneshot(dl_mod_req).await.unwrap();
     assert_eq!(dl_mod_resp.status(), StatusCode::OK);
-    let dl_mod_bytes = axum::body::to_bytes(dl_mod_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_mod_bytes = axum::body::to_bytes(dl_mod_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_mod_bytes.as_ref(), mod_content);
 }
 
@@ -307,7 +358,10 @@ async fn test_cargo_registry_lifecycle() {
     // 3. Check sparse index
     let idx_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/cargo-hosted/cargo/index/cr/{}", crate_name))
+        .uri(format!(
+            "/repository/cargo-hosted/cargo/index/cr/{}",
+            crate_name
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let idx_resp = app.clone().oneshot(idx_req).await.unwrap();
@@ -316,12 +370,17 @@ async fn test_cargo_registry_lifecycle() {
     // 4. Download crate
     let dl_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/cargo-hosted/api/v1/crates/{}/0.1.0/download", crate_name))
+        .uri(format!(
+            "/repository/cargo-hosted/api/v1/crates/{}/0.1.0/download",
+            crate_name
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), crate_tarball);
 }
 
@@ -365,6 +424,8 @@ async fn test_nuget_registry_lifecycle() {
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), fake_nupkg);
 }

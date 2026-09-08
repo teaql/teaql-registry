@@ -17,6 +17,9 @@ pub struct RunCleanupRequest {
 
 pub async fn handle_run_cleanup(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Json(req): Json<RunCleanupRequest>,
 ) -> Response {
     let policy = CleanupPolicy {
@@ -24,14 +27,26 @@ pub async fn handle_run_cleanup(
         snapshot_only: req.snapshot_only.unwrap_or(false),
     };
 
-    match CleanupService::run_cleanup(&state.runtime, state.blobstore.as_ref(), &req.repository, &policy).await {
+    match CleanupService::run_cleanup(
+        &request.runtime,
+        state.blobstore.as_ref(),
+        &req.repository,
+        &policy,
+    )
+    .await
+    {
         Ok(report) => Json(report).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-pub async fn handle_run_gc(State(state): State<AppState>) -> Response {
-    match BlobStoreGcService::run_gc(&state.runtime, state.blobstore.as_ref()).await {
+pub async fn handle_run_gc(
+    State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match BlobStoreGcService::run_gc(&request.runtime, state.blobstore.as_ref()).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

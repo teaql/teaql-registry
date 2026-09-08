@@ -1,6 +1,10 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::{header, Method, Request, StatusCode};
 use bytes::Bytes;
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
@@ -10,16 +14,16 @@ use teaql_registry::{
     },
     services::{BlobStoreService, RepositoryService},
 };
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
 
 async fn setup_docker_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
-    let runtime = Arc::new(service_runtime(config).await.expect("Runtime connect error"));
+    let config = common::runtime_config();
+    let runtime = Arc::new(
+        service_runtime(config)
+            .await
+            .expect("Runtime connect error"),
+    );
     runtime.ensure_schema().await.expect("Schema init error");
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("docker-blobs"));
@@ -51,7 +55,7 @@ async fn setup_docker_test_app() -> axum::Router {
         .unwrap();
     }
 
-    build_app(AppState { runtime, blobstore })
+    build_app(AppState::new(runtime, blobstore))
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -84,18 +88,25 @@ async fn test_docker_blob_and_manifest_lifecycle() {
 
     let init_post_req = Request::builder()
         .method(Method::POST)
-        .uri(format!("/v2/{}/blobs/uploads/?digest={}", image_name, layer_digest))
+        .uri(format!(
+            "/v2/{}/blobs/uploads/?digest={}",
+            image_name, layer_digest
+        ))
         .body(axum::body::Body::from(Bytes::from_static(layer_data)))
         .unwrap();
     let init_post_resp = app.clone().oneshot(init_post_req).await.unwrap();
     assert_eq!(init_post_resp.status(), StatusCode::CREATED);
     assert_eq!(
-        init_post_resp.headers().get("docker-content-digest").unwrap(),
+        init_post_resp
+            .headers()
+            .get("docker-content-digest")
+            .unwrap(),
         layer_digest.as_str()
     );
 
     // 2. Upload Config Blob via Chunked Upload (POST -> PATCH -> PUT)
-    let config_json = b"{\"architecture\":\"amd64\",\"os\":\"linux\",\"rootfs\":{\"type\":\"layers\"}}";
+    let config_json =
+        b"{\"architecture\":\"amd64\",\"os\":\"linux\",\"rootfs\":{\"type\":\"layers\"}}";
     let config_digest = compute_sha256_digest(config_json);
 
     // 2a. POST to init upload
@@ -147,7 +158,9 @@ async fn test_docker_blob_and_manifest_lifecycle() {
         .unwrap();
     let get_blob_resp = app.clone().oneshot(get_blob_req).await.unwrap();
     assert_eq!(get_blob_resp.status(), StatusCode::OK);
-    let read_layer_bytes = axum::body::to_bytes(get_blob_resp.into_body(), 1024 * 1024).await.unwrap();
+    let read_layer_bytes = axum::body::to_bytes(get_blob_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(read_layer_bytes.as_ref(), layer_data);
 
     // 4. Create and Upload Docker Manifest v2
@@ -211,7 +224,9 @@ async fn test_docker_blob_and_manifest_lifecycle() {
         .unwrap();
     let tags_resp = app.clone().oneshot(tags_req).await.unwrap();
     assert_eq!(tags_resp.status(), StatusCode::OK);
-    let tags_body = axum::body::to_bytes(tags_resp.into_body(), 1024 * 1024).await.unwrap();
+    let tags_body = axum::body::to_bytes(tags_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let tag_list: DockerTagList = serde_json::from_slice(&tags_body).unwrap();
     assert_eq!(tag_list.name, image_name);
     assert!(tag_list.tags.contains(&tag.to_string()));

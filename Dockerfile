@@ -1,20 +1,36 @@
-# Stage 1: Static Musl Builder
+# Stage 1: Static Musl Builder with dependency caching
 FROM rust:alpine AS builder
 
 RUN apk add --no-cache musl-dev pkgconfig ca-certificates
 
 WORKDIR /app
 
-# Copy source code and definitions
+# 1. Copy workspace manifests and lock file for dependency caching
 COPY Cargo.toml Cargo.lock ./
+COPY rust-lib-core/lib/Cargo.toml rust-lib-core/lib/
+COPY rust-web-axum/Cargo.toml rust-web-axum/
+
+# Create minimal source stubs so cargo can resolve the workspace
+# Remove registry-tui from workspace members (not needed for server binary)
+RUN sed -i '/"registry-tui"/d' Cargo.toml && \
+    mkdir -p rust-lib-core/lib/src rust-web-axum/src && \
+    touch rust-lib-core/lib/src/lib.rs && \
+    echo 'fn main() {}' > rust-web-axum/src/main.rs && \
+    touch rust-web-axum/src/lib.rs
+
+# 2. Pre-build dependencies only (this layer is cached across rebuilds)
+RUN cargo build --release 2>/dev/null; exit 0
+
+# 3. Copy real source code and model definitions
 COPY rust-lib-core ./rust-lib-core
 COPY rust-web-axum ./rust-web-axum
 COPY models ./models
 
-# Build optimized release binary
-RUN cargo build --release --bin teaql-registry
+# 4. Touch source files to invalidate cargo's fingerprint and rebuild
+RUN touch rust-lib-core/lib/src/lib.rs rust-web-axum/src/main.rs && \
+    cargo build --release --bin teaql-registry
 
-# Stage 2: Ultra-minimal Scratch Runtime (~5.8MB total image size)
+# Stage 2: Ultra-minimal Scratch Runtime
 FROM scratch
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

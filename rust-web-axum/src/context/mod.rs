@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use teaql_registry_core::ServiceRuntime;
 use teaql_core::{Expr, SelectQuery};
+use teaql_registry_core::ServiceRuntime;
 use teaql_runtime::{RequestPolicy, RuntimeError, UserContext};
 
 use crate::blobstore::{BlobStore, BlobStoreManager, MemoryBlobStore};
@@ -35,6 +35,10 @@ impl RequestPolicy for TeaQLRegistryTenantRequestPolicy {
             "SecurityUser",
             "SecurityRole",
             "SecurityPrivilege",
+            "SecurityUserRole",
+            "SecurityRolePrivilege",
+            "ContentRepository",
+            "ServiceLog",
         ];
 
         if tenant_scoped_entities.contains(&query.entity.as_str()) {
@@ -129,7 +133,8 @@ impl RegistryContextExt for ServiceRuntime {
     }
 
     fn blobstore_manager(&self) -> Option<Arc<BlobStoreManager>> {
-        self.get_resource::<BlobStoreManager>().map(|m| Arc::new(m.clone()))
+        self.get_resource::<BlobStoreManager>()
+            .map(|m| Arc::new(m.clone()))
     }
 
     fn set_repository_registry(&mut self, registry: RepositoryRegistry) {
@@ -137,7 +142,8 @@ impl RegistryContextExt for ServiceRuntime {
     }
 
     fn repository_registry(&self) -> Option<Arc<RepositoryRegistry>> {
-        self.get_resource::<RepositoryRegistry>().map(|r| Arc::new(r.clone()))
+        self.get_resource::<RepositoryRegistry>()
+            .map(|r| Arc::new(r.clone()))
     }
 
     fn init_registry_context(&mut self, blobstore: Arc<dyn BlobStore>) {

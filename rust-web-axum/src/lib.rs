@@ -9,7 +9,10 @@ pub mod ui;
 pub mod webhook;
 
 pub use api::{build_app, AppState};
-pub use blobstore::{BlobChecksums, BlobInfo, BlobStore, BlobStoreManager, FileBlobStore, MemoryBlobStore, S3BlobStore};
+pub use blobstore::{
+    BlobChecksums, BlobInfo, BlobStore, BlobStoreManager, FileBlobStore, MemoryBlobStore,
+    S3BlobStore,
+};
 pub use context::{NexusContextExt, RegistryContextExt, TenantInfo};
 pub use engine::{ProxyNegativeCache, RepositoryHandler, RepositoryRegistry};
 pub use security::{AuthUser, PersonalAccessToken, RbacChecker, TokenService};

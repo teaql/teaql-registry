@@ -1,8 +1,7 @@
-
 // ⛔ AI agents: DO NOT read this file for API discovery. Instead run: cargo teaql --input modeling/MODEL.xml rust-assist-query/repository_configuration
 use std::collections::BTreeMap;
 
-use teaql_macros::TeaqlEntity;
+use teaql_macros::{teaql_entity, TeaqlEntity};
 
 /// [TEAQL AI WARNING]
 /// TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
@@ -10,67 +9,86 @@ use teaql_macros::TeaqlEntity;
 /// The methods listed below are the ONLY valid ways to interact with this entity.
 /// If you encounter compilation errors (e.g., method not found), DO NOT guess another method name.
 /// Read the method signatures in this file before proceeding.
+#[teaql_entity]
 #[derive(Clone, Debug, PartialEq, TeaqlEntity)]
-#[teaql(entity = "RepositoryConfiguration", table = "repository_configuration_data", data_service = "postgres")]
+#[teaql(
+    entity = "RepositoryConfiguration",
+    table = "repository_configuration_data",
+    data_service = "postgres"
+)]
 pub struct RepositoryConfiguration {
-#[teaql(id)]
+    #[teaql(id)]
     id: u64,
 
-// @source model.xml:126
+    // @source model.xml:126
     name: String,
 
-// @source model.xml:126
+    // @source model.xml:126
     recipe_name: String,
 
-// @source model.xml:126
+    // @source model.xml:126
     online: bool,
 
-// @source model.xml:126
+    // @source model.xml:126
     remote_url: String,
-#[teaql(version)]
+    #[teaql(version)]
     version: i64,
-// @source model.xml:126
-#[teaql(column = "tenant")]
+    // @source model.xml:126
+    #[teaql(column = "tenant")]
     tenant_id: u64,
 
-// @source model.xml:126
-#[teaql(column = "repository_type")]
+    // @source model.xml:126
+    #[teaql(column = "repository_type")]
     repository_type_id: u64,
 
-// @source model.xml:126
-#[teaql(column = "repository_format")]
+    // @source model.xml:126
+    #[teaql(column = "repository_format")]
     repository_format_id: u64,
 
-// @source model.xml:126
-#[teaql(column = "write_policy")]
+    // @source model.xml:126
+    #[teaql(column = "write_policy")]
     write_policy_id: u64,
 
-// @source model.xml:126
-#[teaql(column = "blob_store")]
+    // @source model.xml:126
+    #[teaql(column = "blob_store")]
     blob_store_id: u64,
-// @source model.xml:126
-#[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
-    tenant: Option<crate::Tenant>,
+    // @source model.xml:126
+    #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
+    tenant: Option<Box<crate::Tenant>>,
 
-// @source model.xml:126
-#[teaql(relation(target = "RepositoryType", local_key = "repository_type_id", foreign_key = "id"))]
-    repository_type: Option<crate::RepositoryType>,
+    // @source model.xml:126
+    #[teaql(relation(
+        target = "RepositoryType",
+        local_key = "repository_type_id",
+        foreign_key = "id"
+    ))]
+    repository_type: Option<Box<crate::RepositoryType>>,
 
-// @source model.xml:126
-#[teaql(relation(target = "RepositoryFormat", local_key = "repository_format_id", foreign_key = "id"))]
-    repository_format: Option<crate::RepositoryFormat>,
+    // @source model.xml:126
+    #[teaql(relation(
+        target = "RepositoryFormat",
+        local_key = "repository_format_id",
+        foreign_key = "id"
+    ))]
+    repository_format: Option<Box<crate::RepositoryFormat>>,
 
-// @source model.xml:126
-#[teaql(relation(target = "WritePolicy", local_key = "write_policy_id", foreign_key = "id"))]
-    write_policy: Option<crate::WritePolicy>,
+    // @source model.xml:126
+    #[teaql(relation(
+        target = "WritePolicy",
+        local_key = "write_policy_id",
+        foreign_key = "id"
+    ))]
+    write_policy: Option<Box<crate::WritePolicy>>,
 
-// @source model.xml:126
-#[teaql(relation(target = "BlobStoreConfiguration", local_key = "blob_store_id", foreign_key = "id"))]
-    blob_store: Option<crate::BlobStoreConfiguration>,
+    // @source model.xml:126
+    #[teaql(relation(
+        target = "BlobStoreConfiguration",
+        local_key = "blob_store_id",
+        foreign_key = "id"
+    ))]
+    blob_store: Option<Box<crate::BlobStoreConfiguration>>,
     #[teaql(dynamic)]
     dynamic: BTreeMap<String, teaql_core::Value>,
-    #[teaql(skip)]
-    root: teaql_runtime::EntityRoot,
     #[teaql(skip)]
     pub __load_state: teaql_core::eval::LoadState,
 }
@@ -82,7 +100,7 @@ impl RepositoryConfiguration {
         teaql_core::Value::U64(id)
     }
 
-    pub(crate) fn runtime_new(root: teaql_runtime::EntityRoot) -> Self {
+    pub(crate) fn runtime_new(root: teaql_runtime::EntityRuntimeState) -> Self {
         Self {
             id: 0_u64,
             name: String::new(),
@@ -101,31 +119,28 @@ impl RepositoryConfiguration {
             write_policy: None,
             blob_store: None,
             dynamic: BTreeMap::new(),
-            root,
+            __teaql_runtime_state: root,
             __load_state: teaql_core::eval::LoadState::FullyLoaded,
         }
     }
 
-    pub fn entity_key(&self) -> teaql_runtime::EntityKey {
-        teaql_runtime::EntityKey::new("RepositoryConfiguration", self.id)
-    }
-
-    pub fn attach_root_recursive(&mut self, root: teaql_runtime::EntityRoot) {
-        self.root = root.clone();
+    pub fn attach_runtime_state_recursive(&mut self, root: teaql_runtime::EntityRuntimeState) {
+        root.adopt_mutations_from(self.__teaql_runtime_state());
+        self.__teaql_replace_runtime_state(root.clone());
         if let Some(entity) = &mut self.tenant {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
         if let Some(entity) = &mut self.repository_type {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
         if let Some(entity) = &mut self.repository_format {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
         if let Some(entity) = &mut self.write_policy {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
         if let Some(entity) = &mut self.blob_store {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
     }
 
@@ -138,245 +153,349 @@ impl RepositoryConfiguration {
     }
 
     pub fn id(&self) -> u64 {
-        self.changed_id().and_then(|value| value.try_u64()).unwrap_or(self.id)
+        self.changed_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.id)
     }
 
     pub fn update_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.id = value.try_u64().unwrap_or(self.id.clone());
-        self.root.set(self.entity_key(), "id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "id", value);
         self
     }
 
     pub fn changed_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "id")
     }
 
     pub fn eval_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "id".to_string(), attempted_path: "id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.id())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "id".to_string(),
+                attempted_path: "id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.id())
+        }
+    }
 
     pub fn name(&self) -> String {
-        self.changed_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.name.clone())
+        self.changed_name()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.name.clone())
     }
 
     pub fn update_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.name.clone());
-        self.root.set(self.entity_key(), "name", value);
+        self.name = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.name.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "name", value);
         self
     }
 
     pub fn changed_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "name")
+        self.__teaql_runtime_state().get(&self.entity_key(), "name")
     }
 
     pub fn eval_name(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("name") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "name".to_string(), attempted_path: "name".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.name())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "name".to_string(),
+                attempted_path: "name".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.name())
+        }
+    }
 
     pub fn recipe_name(&self) -> String {
-        self.changed_recipe_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.recipe_name.clone())
+        self.changed_recipe_name()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.recipe_name.clone())
     }
 
     pub fn update_recipe_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.recipe_name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.recipe_name.clone());
-        self.root.set(self.entity_key(), "recipe_name", value);
+        self.recipe_name = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.recipe_name.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "recipe_name", value);
         self
     }
 
     pub fn changed_recipe_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "recipe_name")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "recipe_name")
     }
 
     pub fn eval_recipe_name(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("recipe_name") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "recipe_name".to_string(), attempted_path: "recipe_name".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.recipe_name())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "recipe_name".to_string(),
+                attempted_path: "recipe_name".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.recipe_name())
+        }
+    }
 
     pub fn online(&self) -> bool {
-        self.changed_online().and_then(|value| value.try_bool()).unwrap_or(self.online)
+        self.changed_online()
+            .and_then(|value| value.try_bool())
+            .unwrap_or(self.online)
     }
 
     pub fn update_online(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.online = value.try_bool().unwrap_or(self.online.clone());
-        self.root.set(self.entity_key(), "online", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "online", value);
         self
     }
 
     pub fn changed_online(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "online")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "online")
     }
 
     pub fn eval_online(&self) -> teaql_core::eval::EvalResult<bool> {
         if !self.is_loaded("online") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "online".to_string(), attempted_path: "online".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.online())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "online".to_string(),
+                attempted_path: "online".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.online())
+        }
+    }
 
     pub fn remote_url(&self) -> String {
-        self.changed_remote_url().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.remote_url.clone())
+        self.changed_remote_url()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.remote_url.clone())
     }
 
     pub fn update_remote_url(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.remote_url = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.remote_url.clone());
-        self.root.set(self.entity_key(), "remote_url", value);
+        self.remote_url = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.remote_url.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "remote_url", value);
         self
     }
 
     pub fn changed_remote_url(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "remote_url")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "remote_url")
     }
 
     pub fn eval_remote_url(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("remote_url") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "remote_url".to_string(), attempted_path: "remote_url".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.remote_url())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "remote_url".to_string(),
+                attempted_path: "remote_url".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.remote_url())
+        }
+    }
 
     pub fn version(&self) -> i64 {
-        self.changed_version().and_then(|value| value.try_i64()).unwrap_or(self.version)
+        self.changed_version()
+            .and_then(|value| value.try_i64())
+            .unwrap_or(self.version)
     }
 
     pub fn update_version(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.version = value.try_i64().unwrap_or(self.version.clone());
-        self.root.set(self.entity_key(), "version", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "version", value);
         self
     }
 
     pub fn changed_version(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "version")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "version")
     }
 
     pub fn eval_version(&self) -> teaql_core::eval::EvalResult<i64> {
         if !self.is_loaded("version") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "version".to_string(), attempted_path: "version".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.version())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "version".to_string(),
+                attempted_path: "version".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.version())
+        }
+    }
     pub fn tenant_id(&self) -> u64 {
-        self.changed_tenant_id().and_then(|value| value.try_u64()).unwrap_or(self.tenant_id)
+        self.changed_tenant_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.tenant_id)
     }
 
     pub fn update_tenant_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.tenant_id = value.try_u64().unwrap_or(self.tenant_id.clone());
-        self.root.set(self.entity_key(), "tenant_id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "tenant_id", value);
         self
     }
 
     pub fn changed_tenant_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "tenant_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "tenant_id")
     }
 
     pub fn eval_tenant_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("tenant_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "tenant_id".to_string(), attempted_path: "tenant_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.tenant_id())
-                }}
-
-    pub fn repository_type_id(&self) -> u64 {
-        self.changed_repository_type_id().and_then(|value| value.try_u64()).unwrap_or(self.repository_type_id)
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "tenant_id".to_string(),
+                attempted_path: "tenant_id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.tenant_id())
+        }
     }
 
-    pub(crate) fn update_repository_type_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
+    pub fn repository_type_id(&self) -> u64 {
+        self.changed_repository_type_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.repository_type_id)
+    }
+
+    pub(crate) fn update_repository_type_id(
+        &mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> &mut Self {
         let value = value.into();
         self.repository_type_id = value.try_u64().unwrap_or(self.repository_type_id.clone());
-        self.root.set(self.entity_key(), "repository_type_id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "repository_type_id", value);
         self
     }
 
     pub fn changed_repository_type_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "repository_type_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "repository_type_id")
     }
 
     pub fn eval_repository_type_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("repository_type_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_type_id".to_string(), attempted_path: "repository_type_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.repository_type_id())
-                }}
-
-    pub fn repository_format_id(&self) -> u64 {
-        self.changed_repository_format_id().and_then(|value| value.try_u64()).unwrap_or(self.repository_format_id)
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "repository_type_id".to_string(),
+                attempted_path: "repository_type_id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.repository_type_id())
+        }
     }
 
-    pub(crate) fn update_repository_format_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
+    pub fn repository_format_id(&self) -> u64 {
+        self.changed_repository_format_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.repository_format_id)
+    }
+
+    pub(crate) fn update_repository_format_id(
+        &mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> &mut Self {
         let value = value.into();
         self.repository_format_id = value.try_u64().unwrap_or(self.repository_format_id.clone());
-        self.root.set(self.entity_key(), "repository_format_id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "repository_format_id", value);
         self
     }
 
     pub fn changed_repository_format_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "repository_format_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "repository_format_id")
     }
 
     pub fn eval_repository_format_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("repository_format_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.repository_format_id())
-                }}
-
-    pub fn write_policy_id(&self) -> u64 {
-        self.changed_write_policy_id().and_then(|value| value.try_u64()).unwrap_or(self.write_policy_id)
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "repository_format_id".to_string(),
+                attempted_path: "repository_format_id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.repository_format_id())
+        }
     }
 
-    pub(crate) fn update_write_policy_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
+    pub fn write_policy_id(&self) -> u64 {
+        self.changed_write_policy_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.write_policy_id)
+    }
+
+    pub(crate) fn update_write_policy_id(
+        &mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> &mut Self {
         let value = value.into();
         self.write_policy_id = value.try_u64().unwrap_or(self.write_policy_id.clone());
-        self.root.set(self.entity_key(), "write_policy_id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "write_policy_id", value);
         self
     }
 
     pub fn changed_write_policy_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "write_policy_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "write_policy_id")
     }
 
     pub fn eval_write_policy_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("write_policy_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "write_policy_id".to_string(), attempted_path: "write_policy_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.write_policy_id())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "write_policy_id".to_string(),
+                attempted_path: "write_policy_id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.write_policy_id())
+        }
+    }
 
     pub fn blob_store_id(&self) -> u64 {
-        self.changed_blob_store_id().and_then(|value| value.try_u64()).unwrap_or(self.blob_store_id)
+        self.changed_blob_store_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.blob_store_id)
     }
 
     pub fn update_blob_store_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.blob_store_id = value.try_u64().unwrap_or(self.blob_store_id.clone());
-        self.root.set(self.entity_key(), "blob_store_id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "blob_store_id", value);
         self
     }
 
     pub fn changed_blob_store_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "blob_store_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "blob_store_id")
     }
 
     pub fn eval_blob_store_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("blob_store_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "blob_store_id".to_string(), attempted_path: "blob_store_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.blob_store_id())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "blob_store_id".to_string(),
+                attempted_path: "blob_store_id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.blob_store_id())
+        }
+    }
     pub fn update_repository_type_to_hosted(&mut self) -> &mut Self {
         self.update_repository_type_id(1001_u64)
     }
@@ -478,88 +597,92 @@ impl RepositoryConfiguration {
         self.write_policy_id() == 1003_u64
     }
     pub fn tenant(&self) -> Option<&crate::Tenant> {
-        self.tenant.as_ref()
+        self.tenant.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.tenant_id())
+        })
     }
 
     pub fn eval_tenant(&self) -> teaql_core::eval::EvalResult<&crate::Tenant> {
-        if !self.is_loaded("tenant") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "tenant".to_string(), attempted_path: "tenant".to_string() }
-        } else {
-            match &self.tenant {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.tenant() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("tenant") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "tenant".to_string(),
+                attempted_path: "tenant".to_string(),
+            },
         }
     }
 
     pub fn repository_type(&self) -> Option<&crate::RepositoryType> {
-        self.repository_type.as_ref()
+        self.repository_type.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.repository_type_id())
+        })
     }
 
     pub fn eval_repository_type(&self) -> teaql_core::eval::EvalResult<&crate::RepositoryType> {
-        if !self.is_loaded("repository_type") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_type".to_string(), attempted_path: "repository_type".to_string() }
-        } else {
-            match &self.repository_type {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.repository_type() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("repository_type") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "repository_type".to_string(),
+                attempted_path: "repository_type".to_string(),
+            },
         }
     }
 
     pub fn repository_format(&self) -> Option<&crate::RepositoryFormat> {
-        self.repository_format.as_ref()
+        self.repository_format.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.repository_format_id())
+        })
     }
 
     pub fn eval_repository_format(&self) -> teaql_core::eval::EvalResult<&crate::RepositoryFormat> {
-        if !self.is_loaded("repository_format") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format".to_string(), attempted_path: "repository_format".to_string() }
-        } else {
-            match &self.repository_format {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.repository_format() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("repository_format") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "repository_format".to_string(),
+                attempted_path: "repository_format".to_string(),
+            },
         }
     }
 
     pub fn write_policy(&self) -> Option<&crate::WritePolicy> {
-        self.write_policy.as_ref()
+        self.write_policy.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.write_policy_id())
+        })
     }
 
     pub fn eval_write_policy(&self) -> teaql_core::eval::EvalResult<&crate::WritePolicy> {
-        if !self.is_loaded("write_policy") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "write_policy".to_string(), attempted_path: "write_policy".to_string() }
-        } else {
-            match &self.write_policy {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.write_policy() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("write_policy") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "write_policy".to_string(),
+                attempted_path: "write_policy".to_string(),
+            },
         }
     }
 
     pub fn blob_store(&self) -> Option<&crate::BlobStoreConfiguration> {
-        self.blob_store.as_ref()
+        self.blob_store.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.blob_store_id())
+        })
     }
 
     pub fn eval_blob_store(&self) -> teaql_core::eval::EvalResult<&crate::BlobStoreConfiguration> {
-        if !self.is_loaded("blob_store") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "blob_store".to_string(), attempted_path: "blob_store".to_string() }
-        } else {
-            match &self.blob_store {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
-            }
+        match self.blob_store() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("blob_store") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "blob_store".to_string(),
+                attempted_path: "blob_store".to_string(),
+            },
         }
     }
-
-    pub fn mark_as_delete(&mut self) -> &mut Self {
-        self.root.mark_as_delete(self.entity_key());
-        self
-    }
-
-    pub fn set_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.root.set_comment(comment);
-        self
-    }
 }
-

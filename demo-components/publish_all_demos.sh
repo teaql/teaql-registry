@@ -2,7 +2,14 @@
 set -e
 
 REGISTRY_URL="http://localhost:8081"
-AUTH="-u admin:admin123"
+
+CREDS_DIR="${CREDENTIALS_DIR:-/tmp/teaql-registry-credentials}"
+if [ -f "$CREDS_DIR/global-admin.txt" ]; then
+    ADMIN_PASS=$(grep '^admin / ' "$CREDS_DIR/global-admin.txt" | sed 's/^admin \/ //')
+else
+    ADMIN_PASS="${ADMIN_PASSWORD:-admin123}"
+fi
+AUTH="-u admin:${ADMIN_PASS}"
 
 echo "=== Publishing Demo Artifacts for All 8 Formats to TeaQL Registry ==="
 

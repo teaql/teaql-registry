@@ -1,14 +1,14 @@
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+#![recursion_limit = "256"]
+
+mod common;
+
 use teaql_registry::services::{
     AssetService, BlobStoreService, ComponentService, RepositoryService, SecurityService,
 };
+use teaql_registry_core::service_runtime;
 
 async fn get_test_runtime() -> teaql_registry_core::ServiceRuntime {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = service_runtime(config).await.expect("connect error");
     runtime.ensure_schema().await.expect("schema error");
     runtime
@@ -65,7 +65,7 @@ async fn test_repository_service() {
     .expect("create repo failed");
 
     assert_eq!(repo.name(), repo_name);
-    assert_eq!(repo.online(), true);
+    assert!(repo.online());
 
     let found = RepositoryService::find_by_name(&runtime, &repo_name)
         .await
@@ -109,9 +109,15 @@ async fn test_security_service() {
     assert!(users.iter().any(|u| u.username() == username));
 
     let unique_role_id = format!("role-{}", uuid::Uuid::new_v4().simple());
-    SecurityService::create_role(&runtime, &unique_role_id, "Test Role", "Test Description", false)
-        .await
-        .expect("create_role failed");
+    SecurityService::create_role(
+        &runtime,
+        &unique_role_id,
+        "Test Role",
+        "Test Description",
+        false,
+    )
+    .await
+    .expect("create_role failed");
 
     let roles = SecurityService::list_roles(&runtime).await.unwrap();
     assert!(roles.iter().any(|r| r.role_id() == unique_role_id));

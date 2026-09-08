@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> AssetBlobRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .asset_blob_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,62 @@ impl<R> AssetBlobRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .asset_blob_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>,
+        TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .asset_blob_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +178,8 @@ impl<R> AssetBlobRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +187,30 @@ impl<R> AssetBlobRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
@@ -187,23 +218,39 @@ impl<R> AssetBlobRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .asset_blob_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +262,21 @@ impl<R> AssetBlobRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for AssetBlob is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for AssetBlob is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .asset_blob_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +284,6 @@ impl<R> AssetBlobRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .asset_blob_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +339,11 @@ impl<R> AssetBlobRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +353,12 @@ impl<R> AssetBlobRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +375,6 @@ impl<R> AssetBlobRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +395,9 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -498,18 +519,13 @@ impl<R> AssetBlobRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "blob_store" => {
-                self.with_blob_store_matching(
-                    crate::Q::blob_store_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "asset_list" => {
-                self.with_asset_list_matching(
-                    crate::Q::assets_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "blob_store" => self.with_blob_store_matching(
+                crate::Q::blob_store_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
+            "asset_list" => self.with_asset_list_matching(
+                crate::Q::assets_minimal().apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -580,6 +596,31 @@ impl<R> AssetBlobRequest<R> {
         self.query = self
             .query
             .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -655,12 +696,24 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -700,12 +753,20 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -736,7 +797,9 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -752,9 +815,7 @@ impl<R> AssetBlobRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -807,7 +868,6 @@ impl<R> AssetBlobRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -825,19 +885,13 @@ impl<R> AssetBlobRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -848,10 +902,9 @@ impl<R> AssetBlobRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -859,10 +912,9 @@ impl<R> AssetBlobRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -885,7 +937,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_blob_ref(mut self) -> Self {
         self.query = self.query.project("blob_ref");
@@ -914,9 +965,7 @@ impl<R> AssetBlobRequest<R> {
     pub fn group_by_blob_ref_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("blob_ref");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("blob_ref"));
+        request.query = request.query.project_expr(alias, Expr::column("blob_ref"));
         request
     }
 
@@ -971,10 +1020,11 @@ impl<R> AssetBlobRequest<R> {
 
     pub fn unselect_blob_ref(mut self) -> Self {
         self.query.projection.retain(|field| field != "blob_ref");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "blob_ref");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "blob_ref");
         self
     }
-
 
     pub fn with_blob_ref(
         mut self,
@@ -1005,8 +1055,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_blob_ref_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("blob_ref", value));
         self
@@ -1017,7 +1065,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_blob_ref_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_blob_ref_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("blob_ref", value));
         self
     }
@@ -1027,7 +1078,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_blob_ref_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_blob_ref_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("blob_ref", value));
         self
     }
@@ -1037,7 +1091,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("blob_ref", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("blob_ref", lower, upper));
         self
     }
 
@@ -1045,11 +1101,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "blob_ref",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("blob_ref", range.start, range.end));
         self
     }
 
@@ -1091,7 +1145,9 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_blob_ref_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("blob_ref", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("blob_ref", value));
         self
     }
 
@@ -1124,13 +1180,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_blob_ref_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("blob_ref"));
         self
     }
-
 
     pub fn order_by_blob_ref_asc(mut self) -> Self {
         self.query = self.query.order_asc("blob_ref");
@@ -1151,7 +1204,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.order_gbk_desc("blob_ref");
         self
     }
-
 
     pub fn select_blob_size(mut self) -> Self {
         self.query = self.query.project("blob_size");
@@ -1192,9 +1244,7 @@ impl<R> AssetBlobRequest<R> {
     pub fn group_by_blob_size_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("blob_size");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("blob_size"));
+        request.query = request.query.project_expr(alias, Expr::column("blob_size"));
         request
     }
 
@@ -1259,7 +1309,10 @@ impl<R> AssetBlobRequest<R> {
         self.square_root_of_population_standard_deviation_blob_size_as("stdDevPop_blob_size")
     }
 
-    pub fn square_root_of_population_standard_deviation_blob_size_as(self, alias: impl Into<String>) -> Self {
+    pub fn square_root_of_population_standard_deviation_blob_size_as(
+        self,
+        alias: impl Into<String>,
+    ) -> Self {
         self.aggregate_stddev_pop("blob_size", alias)
     }
 
@@ -1281,10 +1334,11 @@ impl<R> AssetBlobRequest<R> {
 
     pub fn unselect_blob_size(mut self) -> Self {
         self.query.projection.retain(|field| field != "blob_size");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "blob_size");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "blob_size");
         self
     }
-
 
     pub fn with_blob_size(
         mut self,
@@ -1315,8 +1369,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_blob_size_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("blob_size", value));
         self
@@ -1327,7 +1379,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_blob_size_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_blob_size_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("blob_size", value));
         self
     }
@@ -1337,7 +1392,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_blob_size_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_blob_size_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("blob_size", value));
         self
     }
@@ -1347,7 +1405,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("blob_size", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("blob_size", lower, upper));
         self
     }
 
@@ -1355,11 +1415,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "blob_size",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("blob_size", range.start, range.end));
         self
     }
 
@@ -1400,13 +1458,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_blob_size_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("blob_size"));
         self
     }
-
 
     pub fn order_by_blob_size_asc(mut self) -> Self {
         self.query = self.query.order_asc("blob_size");
@@ -1427,7 +1482,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.order_gbk_desc("blob_size");
         self
     }
-
 
     pub fn select_content_type(mut self) -> Self {
         self.query = self.query.project("content_type");
@@ -1512,11 +1566,14 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unselect_content_type(mut self) -> Self {
-        self.query.projection.retain(|field| field != "content_type");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "content_type");
+        self.query
+            .projection
+            .retain(|field| field != "content_type");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "content_type");
         self
     }
-
 
     pub fn with_content_type(
         mut self,
@@ -1547,8 +1604,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_content_type_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("content_type", value));
         self
@@ -1559,7 +1614,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_content_type_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_content_type_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("content_type", value));
         self
     }
@@ -1569,7 +1627,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_content_type_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_content_type_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("content_type", value));
         self
     }
@@ -1579,7 +1640,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("content_type", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("content_type", lower, upper));
         self
     }
 
@@ -1587,11 +1650,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "content_type",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("content_type", range.start, range.end));
         self
     }
 
@@ -1623,17 +1684,23 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_content_type_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("content_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("content_type", value));
         self
     }
 
     pub fn with_content_type_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("content_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("content_type", value));
         self
     }
 
     pub fn with_content_type_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("content_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("content_type", value));
         self
     }
 
@@ -1643,12 +1710,16 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_content_type_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("content_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("content_type", value));
         self
     }
 
     pub fn with_content_type_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("content_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("content_type", value));
         self
     }
     pub fn with_content_type_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1666,13 +1737,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_content_type_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("content_type"));
         self
     }
-
 
     pub fn order_by_content_type_asc(mut self) -> Self {
         self.query = self.query.order_asc("content_type");
@@ -1693,7 +1761,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.order_gbk_desc("content_type");
         self
     }
-
 
     pub fn select_sha1_checksum(mut self) -> Self {
         self.query = self.query.project("sha1_checksum");
@@ -1778,11 +1845,14 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unselect_sha1_checksum(mut self) -> Self {
-        self.query.projection.retain(|field| field != "sha1_checksum");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "sha1_checksum");
+        self.query
+            .projection
+            .retain(|field| field != "sha1_checksum");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "sha1_checksum");
         self
     }
-
 
     pub fn with_sha1_checksum(
         mut self,
@@ -1813,8 +1883,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_sha1_checksum_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("sha1_checksum", value));
         self
@@ -1825,7 +1893,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_sha1_checksum_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_sha1_checksum_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("sha1_checksum", value));
         self
     }
@@ -1835,7 +1906,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_sha1_checksum_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_sha1_checksum_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("sha1_checksum", value));
         self
     }
@@ -1845,7 +1919,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("sha1_checksum", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("sha1_checksum", lower, upper));
         self
     }
 
@@ -1853,11 +1929,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "sha1_checksum",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("sha1_checksum", range.start, range.end));
         self
     }
 
@@ -1889,32 +1963,44 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_sha1_checksum_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("sha1_checksum", value));
         self
     }
 
     pub fn with_sha1_checksum_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("sha1_checksum", value));
         self
     }
 
     pub fn with_sha1_checksum_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("sha1_checksum", value));
         self
     }
 
     pub fn with_sha1_checksum_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::end_with("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::end_with("sha1_checksum", value));
         self
     }
 
     pub fn with_sha1_checksum_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("sha1_checksum", value));
         self
     }
 
     pub fn with_sha1_checksum_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("sha1_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("sha1_checksum", value));
         self
     }
     pub fn with_sha1_checksum_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1932,13 +2018,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_sha1_checksum_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("sha1_checksum"));
         self
     }
-
 
     pub fn order_by_sha1_checksum_asc(mut self) -> Self {
         self.query = self.query.order_asc("sha1_checksum");
@@ -1960,7 +2043,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
     pub fn select_sha256_checksum(mut self) -> Self {
         self.query = self.query.project("sha256_checksum");
         self
@@ -1974,7 +2056,10 @@ impl<R> AssetBlobRequest<R> {
         self.select_sha256_checksum_unsafe_raw(UnsafeRawSqlSegment::trusted(raw_sql_segment))
     }
 
-    pub fn select_sha256_checksum_unsafe_raw(mut self, raw_sql_segment: UnsafeRawSqlSegment) -> Self {
+    pub fn select_sha256_checksum_unsafe_raw(
+        mut self,
+        raw_sql_segment: UnsafeRawSqlSegment,
+    ) -> Self {
         self.query_options
             .raw_projections
             .push(RawProjection::new("sha256_checksum", raw_sql_segment));
@@ -2044,11 +2129,14 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unselect_sha256_checksum(mut self) -> Self {
-        self.query.projection.retain(|field| field != "sha256_checksum");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "sha256_checksum");
+        self.query
+            .projection
+            .retain(|field| field != "sha256_checksum");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "sha256_checksum");
         self
     }
-
 
     pub fn with_sha256_checksum(
         mut self,
@@ -2079,19 +2167,23 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_sha256_checksum_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("sha256_checksum", value));
         self
     }
 
-    pub fn with_sha256_checksum_greater_than(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_sha256_checksum_greater_than(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gt("sha256_checksum", value));
         self
     }
 
-    pub fn with_sha256_checksum_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_sha256_checksum_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("sha256_checksum", value));
         self
     }
@@ -2101,7 +2193,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_sha256_checksum_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_sha256_checksum_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("sha256_checksum", value));
         self
     }
@@ -2111,7 +2206,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("sha256_checksum", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("sha256_checksum", lower, upper));
         self
     }
 
@@ -2119,11 +2216,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "sha256_checksum",
-            range.start,
-            range.end,
-        ));
+        self.query =
+            self.query
+                .and_filter(Expr::between("sha256_checksum", range.start, range.end));
         self
     }
 
@@ -2150,37 +2245,54 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_sha256_checksum_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::contain("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::contain("sha256_checksum", value));
         self
     }
 
     pub fn with_sha256_checksum_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("sha256_checksum", value));
         self
     }
 
     pub fn with_sha256_checksum_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("sha256_checksum", value));
         self
     }
 
     pub fn with_sha256_checksum_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("sha256_checksum", value));
         self
     }
 
     pub fn with_sha256_checksum_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::end_with("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::end_with("sha256_checksum", value));
         self
     }
 
     pub fn with_sha256_checksum_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("sha256_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("sha256_checksum", value));
         self
     }
 
-    pub fn with_sha256_checksum_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("sha256_checksum", value));
+    pub fn with_sha256_checksum_sounding_like(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("sha256_checksum", value));
         self
     }
     pub fn with_sha256_checksum_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -2198,13 +2310,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_sha256_checksum_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("sha256_checksum"));
         self
     }
-
 
     pub fn order_by_sha256_checksum_asc(mut self) -> Self {
         self.query = self.query.order_asc("sha256_checksum");
@@ -2225,7 +2334,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.order_gbk_desc("sha256_checksum");
         self
     }
-
 
     pub fn select_md5_checksum(mut self) -> Self {
         self.query = self.query.project("md5_checksum");
@@ -2310,11 +2418,14 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unselect_md5_checksum(mut self) -> Self {
-        self.query.projection.retain(|field| field != "md5_checksum");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "md5_checksum");
+        self.query
+            .projection
+            .retain(|field| field != "md5_checksum");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "md5_checksum");
         self
     }
-
 
     pub fn with_md5_checksum(
         mut self,
@@ -2345,8 +2456,6 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_md5_checksum_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("md5_checksum", value));
         self
@@ -2357,7 +2466,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_md5_checksum_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_md5_checksum_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("md5_checksum", value));
         self
     }
@@ -2367,7 +2479,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-    pub fn with_md5_checksum_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_md5_checksum_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("md5_checksum", value));
         self
     }
@@ -2377,7 +2492,9 @@ impl<R> AssetBlobRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("md5_checksum", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("md5_checksum", lower, upper));
         self
     }
 
@@ -2385,11 +2502,9 @@ impl<R> AssetBlobRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "md5_checksum",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("md5_checksum", range.start, range.end));
         self
     }
 
@@ -2421,17 +2536,23 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_md5_checksum_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("md5_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("md5_checksum", value));
         self
     }
 
     pub fn with_md5_checksum_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("md5_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("md5_checksum", value));
         self
     }
 
     pub fn with_md5_checksum_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("md5_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("md5_checksum", value));
         self
     }
 
@@ -2441,12 +2562,16 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn with_md5_checksum_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("md5_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("md5_checksum", value));
         self
     }
 
     pub fn with_md5_checksum_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("md5_checksum", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("md5_checksum", value));
         self
     }
     pub fn with_md5_checksum_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -2464,13 +2589,10 @@ impl<R> AssetBlobRequest<R> {
         self
     }
 
-
-
     pub fn with_md5_checksum_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("md5_checksum"));
         self
     }
-
 
     pub fn order_by_md5_checksum_asc(mut self) -> Self {
         self.query = self.query.order_asc("md5_checksum");
@@ -2499,9 +2621,7 @@ impl<R> AssetBlobRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -2574,7 +2694,9 @@ impl<R> AssetBlobRequest<R> {
         self
     }
     pub fn filter_by_blob_store(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("blob_store_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("blob_store_id", value.entity_id_value()));
         self
     }
 
@@ -2586,10 +2708,10 @@ impl<R> AssetBlobRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store", selection));
+        self.relation_filters
+            .push(RelationFilter::new("blob_store", selection));
         self
     }
-
 
     pub fn without_blob_store_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -2599,10 +2721,10 @@ impl<R> AssetBlobRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store", selection));
+        self.relation_filters
+            .push(RelationFilter::new("blob_store", selection));
         self
     }
-
 
     pub fn have_blob_store(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("blob_store_id"));
@@ -2613,7 +2735,6 @@ impl<R> AssetBlobRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("blob_store_id"));
         self
     }
-
 
     pub fn group_by_blob_store(self) -> Self {
         self.group_by("blob_store_id")
@@ -2648,13 +2769,14 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn group_by_blob_store_with_details(self) -> Self {
-        self.group_by_blob_store_with_details_from(crate::Q::blob_store_configurations().unlimited())
+        self.group_by_blob_store_with_details_from(
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
     pub fn group_by_blob_store_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
         self.group_by_blob_store_with(request)
     }
-
 
     pub fn roll_up_to_blob_store(self) -> Self {
         self.roll_up_to_blob_store_with(crate::Q::blob_store_configurations().unlimited())
@@ -2675,8 +2797,12 @@ impl<R> AssetBlobRequest<R> {
     }
 
     pub fn unselect_blob_store(mut self) -> Self {
-        self.query.projection.retain(|field| field != "blob_store_id");
-        self.query.relations.retain(|relation| relation.name != "blob_store");
+        self.query
+            .projection
+            .retain(|field| field != "blob_store_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "blob_store");
         self
     }
     pub fn select_blob_store(mut self) -> Self {
@@ -2686,12 +2812,17 @@ impl<R> AssetBlobRequest<R> {
 
     pub fn select_blob_store_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("blob_store", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("blob_store", selection));
+        self.query = self
+            .query
+            .relation_query("blob_store", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_blob_store_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_blob_store_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_blob_store_as_with_options(facet_name, request, true)
     }
 
@@ -2710,11 +2841,11 @@ impl<R> AssetBlobRequest<R> {
         self
     }
     pub fn have_assets(self) -> Self {
-        self.with_asset_list_matching(SelectQuery::new("Asset"))
+        self.with_asset_list_matching(crate::Q::assets_minimal())
     }
 
     pub fn have_no_assets(self) -> Self {
-        self.without_asset_list_matching(SelectQuery::new("Asset"))
+        self.without_asset_list_matching(crate::Q::assets_minimal())
     }
 
     pub fn with_asset_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2725,7 +2856,8 @@ impl<R> AssetBlobRequest<R> {
             selection.query.clone(),
             "asset_blob_id",
         ));
-        self.relation_filters.push(RelationFilter::new("asset_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("asset_list", selection));
         self
     }
 
@@ -2737,7 +2869,8 @@ impl<R> AssetBlobRequest<R> {
             selection.query.clone(),
             "asset_blob_id",
         ));
-        self.relation_filters.push(RelationFilter::new("asset_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("asset_list", selection));
         self
     }
 
@@ -2748,10 +2881,11 @@ impl<R> AssetBlobRequest<R> {
 
     pub fn select_asset_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("asset_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("asset_list", selection));
+        self.query = self
+            .query
+            .relation_query("asset_list", selection.into_query());
         self
-}
+    }
     pub fn count_assets(self) -> Self {
         self.count_assets_as("count_assets")
     }
@@ -2760,14 +2894,15 @@ impl<R> AssetBlobRequest<R> {
         self.count_assets_with(alias, crate::Q::assets().unlimited())
     }
 
-    pub fn count_assets_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_assets_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "asset_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new("asset_list", alias, selection, true));
         self
     }
 
@@ -2775,14 +2910,32 @@ impl<R> AssetBlobRequest<R> {
         self.stats_from_assets_as("refinements", request)
     }
 
-    pub fn stats_from_assets_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_assets_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "asset_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "asset_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_assets_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new("asset_list", alias, selection, true));
         self
     }
 
@@ -2790,62 +2943,165 @@ impl<R> AssetBlobRequest<R> {
         self.stats_from_assets(request)
     }
 
-
     pub fn sum_component_id_of_assets(self) -> Self {
-        self.sum_component_id_of_assets_as("sum_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sum_component_id_of_assets_as(
+            "sum_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sum_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().sum("component_id", "sum_component_id"))
+    pub fn sum_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("component_id", "sum_component_id"),
+        )
     }
     pub fn min_component_id_of_assets(self) -> Self {
-        self.min_component_id_of_assets_as("min_component_id_of_assets", crate::Q::assets().unlimited())
+        self.min_component_id_of_assets_as(
+            "min_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn min_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().min("component_id", "min_component_id"))
+    pub fn min_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("component_id", "min_component_id"),
+        )
     }
     pub fn max_component_id_of_assets(self) -> Self {
-        self.max_component_id_of_assets_as("max_component_id_of_assets", crate::Q::assets().unlimited())
+        self.max_component_id_of_assets_as(
+            "max_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn max_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().max("component_id", "max_component_id"))
+    pub fn max_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("component_id", "max_component_id"),
+        )
     }
     pub fn avg_component_id_of_assets(self) -> Self {
-        self.avg_component_id_of_assets_as("avg_component_id_of_assets", crate::Q::assets().unlimited())
+        self.avg_component_id_of_assets_as(
+            "avg_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn avg_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().avg("component_id", "avg_component_id"))
+    pub fn avg_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("component_id", "avg_component_id"),
+        )
     }
     pub fn standard_deviation_component_id_of_assets(self) -> Self {
-        self.standard_deviation_component_id_of_assets_as("standard_deviation_component_id_of_assets", crate::Q::assets().unlimited())
+        self.standard_deviation_component_id_of_assets_as(
+            "standard_deviation_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().stddev("component_id", "stdDev_component_id"))
+    pub fn standard_deviation_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("component_id", "stdDev_component_id"),
+        )
     }
     pub fn square_root_of_population_standard_deviation_component_id_of_assets(self) -> Self {
-        self.square_root_of_population_standard_deviation_component_id_of_assets_as("square_root_of_population_standard_deviation_component_id_of_assets", crate::Q::assets().unlimited())
+        self.square_root_of_population_standard_deviation_component_id_of_assets_as(
+            "square_root_of_population_standard_deviation_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn square_root_of_population_standard_deviation_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().stddev_pop("component_id", "stdDevPop_component_id"))
+    pub fn square_root_of_population_standard_deviation_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("component_id", "stdDevPop_component_id"),
+        )
     }
     pub fn sample_variance_component_id_of_assets(self) -> Self {
-        self.sample_variance_component_id_of_assets_as("sample_variance_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sample_variance_component_id_of_assets_as(
+            "sample_variance_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sample_variance_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().var_samp("component_id", "varSamp_component_id"))
+    pub fn sample_variance_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("component_id", "varSamp_component_id"),
+        )
     }
     pub fn sample_population_variance_component_id_of_assets(self) -> Self {
-        self.sample_population_variance_component_id_of_assets_as("sample_population_variance_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sample_population_variance_component_id_of_assets_as(
+            "sample_population_variance_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().var_pop("component_id", "varPop_component_id"))
+    pub fn sample_population_variance_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("component_id", "varPop_component_id"),
+        )
     }
 }
 
@@ -2855,13 +3111,13 @@ impl<R> Default for AssetBlobRequest<R> {
     }
 }
 
-impl<R> From< AssetBlobRequest<R> > for SelectQuery {
+impl<R> From<AssetBlobRequest<R>> for SelectQuery {
     fn from(request: AssetBlobRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< AssetBlobRequest<R> > for QuerySelection {
+impl<R> From<AssetBlobRequest<R>> for QuerySelection {
     fn from(request: AssetBlobRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -2873,14 +3129,19 @@ impl<R> From< AssetBlobRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::AssetBlob> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::AssetBlob>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::AssetBlobRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::AssetBlob;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -2893,98 +3154,160 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<AssetBlobRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::AssetBlob
+    pub fn new_entity<C>(&self, context: &C) -> crate::AssetBlob
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::AssetBlob::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::AssetBlob::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity =
+            crate::AssetBlob::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::AssetBlob::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> AssetBlobRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::AssetBlobRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

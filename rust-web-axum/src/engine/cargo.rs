@@ -11,7 +11,10 @@ pub struct CargoEngine;
 impl CargoEngine {
     pub async fn get_config(repo_url: &str) -> CargoIndexConfig {
         CargoIndexConfig {
-            dl: format!("{}/api/v1/crates/{{crate}}/{{version}}/download", repo_url.trim_end_matches('/')),
+            dl: format!(
+                "{}/api/v1/crates/{{crate}}/{{version}}/download",
+                repo_url.trim_end_matches('/')
+            ),
             api: repo_url.trim_end_matches('/').to_string(),
         }
     }
@@ -24,7 +27,8 @@ impl CargoEngine {
         version: &str,
         crate_data: &[u8],
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "cargo").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "cargo").await?;
         let blob_info = blobstore.create_blob(crate_data).await?;
 
         let asset_blob = AssetService::create_asset_blob(
@@ -86,8 +90,12 @@ impl CargoEngine {
             None => return Ok(None),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
-        let matching: Vec<_> = comps.into_iter().filter(|c| c.name() == crate_name).collect();
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let matching: Vec<_> = comps
+            .into_iter()
+            .filter(|c| c.name() == crate_name)
+            .collect();
 
         if matching.is_empty() {
             return Ok(None);
@@ -99,7 +107,8 @@ impl CargoEngine {
                 name: crate_name.to_string(),
                 vers: c.version_name().to_string(),
                 deps: Vec::new(),
-                cksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+                cksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .to_string(),
                 features: serde_json::json!({}),
                 yanked: false,
             };

@@ -1,18 +1,18 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use std::sync::Arc;
 use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
 use teaql_registry::services::{
     AssetService, BlobStoreService, CleanupPolicy, CleanupService, ComponentService,
     RepositoryService,
 };
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry_core::service_runtime;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_retention_and_cleanup_policy() {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime error"));
     runtime.ensure_schema().await.expect("Schema error");
 
@@ -20,7 +20,9 @@ async fn test_retention_and_cleanup_policy() {
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_name = format!("bs-cl-{}", uuid::Uuid::new_v4().simple());
-    let bs = BlobStoreService::create(&runtime, &bs_name, "/tmp", true).await.unwrap();
+    let bs = BlobStoreService::create(&runtime, &bs_name, "/tmp", true)
+        .await
+        .unwrap();
 
     let repo_name = format!("repo-cl-{}", uuid::Uuid::new_v4().simple());
     let repo = RepositoryService::create(
@@ -55,7 +57,10 @@ async fn test_retention_and_cleanup_policy() {
         .await
         .unwrap();
 
-        let blob_info = blobstore.create_blob(format!("Payload for {}", ver).as_bytes()).await.unwrap();
+        let blob_info = blobstore
+            .create_blob(format!("Payload for {}", ver).as_bytes())
+            .await
+            .unwrap();
         let asset_blob = AssetService::create_asset_blob(
             &runtime,
             bs.id(),
@@ -74,7 +79,10 @@ async fn test_retention_and_cleanup_policy() {
             content_repo.id(),
             comp.id(),
             asset_blob.id(),
-            &format!("/com/example/cleanup-test-lib/{}/cleanup-test-lib-{}.jar", ver, ver),
+            &format!(
+                "/com/example/cleanup-test-lib/{}/cleanup-test-lib-{}.jar",
+                ver, ver
+            ),
             "jar",
         )
         .await

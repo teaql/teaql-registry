@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .repository_configuration_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,65 @@ impl<R> RepositoryConfigurationRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        SmartList<teaql_core::CompactRow>,
+        TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .repository_configuration_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>,
+        TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .repository_configuration_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +181,8 @@ impl<R> RepositoryConfigurationRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +190,30 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
@@ -187,23 +221,39 @@ impl<R> RepositoryConfigurationRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .repository_configuration_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +265,21 @@ impl<R> RepositoryConfigurationRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for RepositoryConfiguration is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for RepositoryConfiguration is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .repository_configuration_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +287,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .repository_configuration_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +342,11 @@ impl<R> RepositoryConfigurationRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +356,12 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +378,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +398,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -500,36 +524,22 @@ impl<R> RepositoryConfigurationRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "tenant" => {
-                self.with_tenant_matching(
-                    crate::Q::tenants_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "repository_type" => {
-                self.with_repository_type_matching(
-                    crate::Q::repository_types_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "repository_format" => {
-                self.with_repository_format_matching(
-                    crate::Q::repository_formats_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "write_policy" => {
-                self.with_write_policy_matching(
-                    crate::Q::write_policies_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "blob_store" => {
-                self.with_blob_store_matching(
-                    crate::Q::blob_store_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "tenant" => self.with_tenant_matching(
+                crate::Q::tenants_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "repository_type" => self.with_repository_type_matching(
+                crate::Q::repository_types_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "repository_format" => self.with_repository_format_matching(
+                crate::Q::repository_formats_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "write_policy" => self.with_write_policy_matching(
+                crate::Q::write_policies_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "blob_store" => self.with_blob_store_matching(
+                crate::Q::blob_store_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -600,6 +610,31 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self
             .query
             .optimize_for_continuous_page_fetch_with(namespace, ttl_seconds);
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
         self
     }
 
@@ -679,12 +714,24 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -724,12 +771,20 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -760,7 +815,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -776,9 +833,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -831,7 +886,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -849,19 +903,13 @@ impl<R> RepositoryConfigurationRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -872,10 +920,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -883,10 +930,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -909,7 +955,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_name(mut self) -> Self {
         self.query = self.query.project("name");
@@ -938,9 +983,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn group_by_name_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("name");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("name"));
+        request.query = request.query.project_expr(alias, Expr::column("name"));
         request
     }
 
@@ -995,10 +1038,11 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn unselect_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "name");
         self
     }
-
 
     pub fn with_name(
         mut self,
@@ -1029,8 +1073,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("name", value));
         self
@@ -1041,7 +1083,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn with_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("name", value));
         self
     }
@@ -1069,11 +1114,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("name", range.start, range.end));
         self
     }
 
@@ -1081,10 +1124,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "name",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("name", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1148,13 +1190,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("name"));
         self
     }
-
 
     pub fn order_by_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("name");
@@ -1175,7 +1214,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.order_gbk_desc("name");
         self
     }
-
 
     pub fn select_recipe_name(mut self) -> Self {
         self.query = self.query.project("recipe_name");
@@ -1261,10 +1299,11 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn unselect_recipe_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "recipe_name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "recipe_name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "recipe_name");
         self
     }
-
 
     pub fn with_recipe_name(
         mut self,
@@ -1295,8 +1334,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_recipe_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("recipe_name", value));
         self
@@ -1307,7 +1344,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn with_recipe_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_recipe_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("recipe_name", value));
         self
     }
@@ -1317,7 +1357,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn with_recipe_name_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_recipe_name_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("recipe_name", value));
         self
     }
@@ -1327,7 +1370,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("recipe_name", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("recipe_name", lower, upper));
         self
     }
 
@@ -1335,11 +1380,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "recipe_name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("recipe_name", range.start, range.end));
         self
     }
 
@@ -1371,17 +1414,23 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn with_recipe_name_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("recipe_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("recipe_name", value));
         self
     }
 
     pub fn with_recipe_name_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("recipe_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("recipe_name", value));
         self
     }
 
     pub fn with_recipe_name_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("recipe_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("recipe_name", value));
         self
     }
 
@@ -1391,12 +1440,16 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn with_recipe_name_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("recipe_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("recipe_name", value));
         self
     }
 
     pub fn with_recipe_name_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("recipe_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("recipe_name", value));
         self
     }
     pub fn with_recipe_name_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1414,13 +1467,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_recipe_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("recipe_name"));
         self
     }
-
 
     pub fn order_by_recipe_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("recipe_name");
@@ -1441,7 +1491,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.order_gbk_desc("recipe_name");
         self
     }
-
 
     pub fn select_online(mut self) -> Self {
         self.query = self.query.project("online");
@@ -1470,9 +1519,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn group_by_online_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("online");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("online"));
+        request.query = request.query.project_expr(alias, Expr::column("online"));
         request
     }
 
@@ -1527,7 +1574,9 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn unselect_online(mut self) -> Self {
         self.query.projection.retain(|field| field != "online");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "online");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "online");
         self
     }
 
@@ -1538,6 +1587,16 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn which_are_not_online(mut self) -> Self {
         self.query = self.query.and_filter(Expr::eq("online", false));
+        self
+    }
+
+    pub fn with_online_is_unknown(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_null("online"));
+        self
+    }
+
+    pub fn with_online_is_known(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_not_null("online"));
         self
     }
     pub fn order_by_online_asc(mut self) -> Self {
@@ -1559,7 +1618,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.order_gbk_desc("online");
         self
     }
-
 
     pub fn select_remote_url(mut self) -> Self {
         self.query = self.query.project("remote_url");
@@ -1645,10 +1703,11 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn unselect_remote_url(mut self) -> Self {
         self.query.projection.retain(|field| field != "remote_url");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "remote_url");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "remote_url");
         self
     }
-
 
     pub fn with_remote_url(
         mut self,
@@ -1679,8 +1738,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_remote_url_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("remote_url", value));
         self
@@ -1691,7 +1748,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn with_remote_url_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_remote_url_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("remote_url", value));
         self
     }
@@ -1701,7 +1761,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-    pub fn with_remote_url_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_remote_url_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("remote_url", value));
         self
     }
@@ -1711,7 +1774,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("remote_url", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("remote_url", lower, upper));
         self
     }
 
@@ -1719,11 +1784,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "remote_url",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("remote_url", range.start, range.end));
         self
     }
 
@@ -1755,7 +1818,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn with_remote_url_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("remote_url", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("remote_url", value));
         self
     }
 
@@ -1765,7 +1830,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn with_remote_url_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("remote_url", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("remote_url", value));
         self
     }
 
@@ -1775,7 +1842,9 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn with_remote_url_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("remote_url", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("remote_url", value));
         self
     }
 
@@ -1798,13 +1867,10 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
-
     pub fn with_remote_url_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("remote_url"));
         self
     }
-
 
     pub fn order_by_remote_url_asc(mut self) -> Self {
         self.query = self.query.order_asc("remote_url");
@@ -1833,9 +1899,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -1908,7 +1972,9 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
     pub fn filter_by_tenant(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("tenant_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("tenant_id", value.entity_id_value()));
         self
     }
 
@@ -1920,10 +1986,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("tenant", selection));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
         self
     }
-
 
     pub fn without_tenant_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -1933,10 +1999,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("tenant", selection));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
         self
     }
-
 
     pub fn have_tenant(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("tenant_id"));
@@ -1948,7 +2014,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
-
     pub fn group_by_tenant(self) -> Self {
         self.group_by("tenant_id")
     }
@@ -1956,9 +2021,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     pub fn group_by_tenant_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("tenant_id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("tenant_id"));
+        request.query = request.query.project_expr(alias, Expr::column("tenant_id"));
         request
     }
 
@@ -1989,7 +2052,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.group_by_tenant_with(request)
     }
 
-
     pub fn roll_up_to_tenant(self) -> Self {
         self.roll_up_to_tenant_with(crate::Q::tenants().unlimited())
     }
@@ -2010,14 +2072,17 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn unselect_tenant(mut self) -> Self {
         self.query.projection.retain(|field| field != "tenant_id");
-        self.query.relations.retain(|relation| relation.name != "tenant");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "tenant");
         self
     }
 
-
     /// Please use `with_repository_type_is` instead
     pub(crate) fn filter_by_repository_type(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("repository_type_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("repository_type_id", value.entity_id_value()));
         self
     }
     /// Complex relation filter for `repository_type`.
@@ -2032,7 +2097,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_types_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_repository_type_matching(dynamic_query);
@@ -2045,10 +2110,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_type", selection));
+        self.relation_filters
+            .push(RelationFilter::new("repository_type", selection));
         self
     }
-
 
     /// Complex relation filter for `repository_type`.
     ///
@@ -2062,7 +2127,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_types_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_repository_type_matching(dynamic_query);
@@ -2075,13 +2140,15 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_type", selection));
+        self.relation_filters
+            .push(RelationFilter::new("repository_type", selection));
         self
     }
 
-
     pub fn have_repository_type(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::is_not_null("repository_type_id"));
+        self.query = self
+            .query
+            .and_filter(Expr::is_not_null("repository_type_id"));
         self
     }
 
@@ -2089,7 +2156,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("repository_type_id"));
         self
     }
-
 
     pub fn group_by_repository_type(self) -> Self {
         self.group_by("repository_type_id")
@@ -2109,8 +2175,11 @@ impl<R> RepositoryConfigurationRequest<R> {
         alias: impl Into<String>,
         function: AggregateFunction,
     ) -> Self {
-        self.group_by("repository_type_id")
-            .aggregate_with_function("repository_type_id", alias, function)
+        self.group_by("repository_type_id").aggregate_with_function(
+            "repository_type_id",
+            alias,
+            function,
+        )
     }
 
     pub fn group_by_repository_type_with(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2127,10 +2196,12 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.group_by_repository_type_with_details_from(crate::Q::repository_types().unlimited())
     }
 
-    pub fn group_by_repository_type_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
+    pub fn group_by_repository_type_with_details_from(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.group_by_repository_type_with(request)
     }
-
 
     pub fn roll_up_to_repository_type(self) -> Self {
         self.roll_up_to_repository_type_with(crate::Q::repository_types().unlimited())
@@ -2151,15 +2222,20 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn unselect_repository_type(mut self) -> Self {
-        self.query.projection.retain(|field| field != "repository_type_id");
-        self.query.relations.retain(|relation| relation.name != "repository_type");
+        self.query
+            .projection
+            .retain(|field| field != "repository_type_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "repository_type");
         self
     }
 
-
     /// Please use `with_repository_format_is` instead
     pub(crate) fn filter_by_repository_format(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("repository_format_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("repository_format_id", value.entity_id_value()));
         self
     }
     /// Complex relation filter for `repository_format`.
@@ -2174,7 +2250,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_formats_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_repository_format_matching(dynamic_query);
@@ -2187,10 +2263,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_format", selection));
+        self.relation_filters
+            .push(RelationFilter::new("repository_format", selection));
         self
     }
-
 
     /// Complex relation filter for `repository_format`.
     ///
@@ -2204,12 +2280,15 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_formats_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_repository_format_matching(dynamic_query);
     /// ```
-    pub fn without_repository_format_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_repository_format_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "repository_format_id",
@@ -2217,13 +2296,15 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_format", selection));
+        self.relation_filters
+            .push(RelationFilter::new("repository_format", selection));
         self
     }
 
-
     pub fn have_repository_format(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::is_not_null("repository_format_id"));
+        self.query = self
+            .query
+            .and_filter(Expr::is_not_null("repository_format_id"));
         self
     }
 
@@ -2231,7 +2312,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("repository_format_id"));
         self
     }
-
 
     pub fn group_by_repository_format(self) -> Self {
         self.group_by("repository_format_id")
@@ -2266,13 +2346,17 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn group_by_repository_format_with_details(self) -> Self {
-        self.group_by_repository_format_with_details_from(crate::Q::repository_formats().unlimited())
+        self.group_by_repository_format_with_details_from(
+            crate::Q::repository_formats().unlimited(),
+        )
     }
 
-    pub fn group_by_repository_format_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
+    pub fn group_by_repository_format_with_details_from(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.group_by_repository_format_with(request)
     }
-
 
     pub fn roll_up_to_repository_format(self) -> Self {
         self.roll_up_to_repository_format_with(crate::Q::repository_formats().unlimited())
@@ -2293,15 +2377,20 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn unselect_repository_format(mut self) -> Self {
-        self.query.projection.retain(|field| field != "repository_format_id");
-        self.query.relations.retain(|relation| relation.name != "repository_format");
+        self.query
+            .projection
+            .retain(|field| field != "repository_format_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "repository_format");
         self
     }
 
-
     /// Please use `with_write_policy_is` instead
     pub(crate) fn filter_by_write_policy(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("write_policy_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("write_policy_id", value.entity_id_value()));
         self
     }
     /// Complex relation filter for `write_policy`.
@@ -2316,7 +2405,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::write_policies_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_write_policy_matching(dynamic_query);
@@ -2329,10 +2418,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("write_policy", selection));
+        self.relation_filters
+            .push(RelationFilter::new("write_policy", selection));
         self
     }
-
 
     /// Complex relation filter for `write_policy`.
     ///
@@ -2346,7 +2435,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::write_policies_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_write_policy_matching(dynamic_query);
@@ -2359,10 +2448,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("write_policy", selection));
+        self.relation_filters
+            .push(RelationFilter::new("write_policy", selection));
         self
     }
-
 
     pub fn have_write_policy(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("write_policy_id"));
@@ -2373,7 +2462,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("write_policy_id"));
         self
     }
-
 
     pub fn group_by_write_policy(self) -> Self {
         self.group_by("write_policy_id")
@@ -2411,10 +2499,12 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.group_by_write_policy_with_details_from(crate::Q::write_policies().unlimited())
     }
 
-    pub fn group_by_write_policy_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
+    pub fn group_by_write_policy_with_details_from(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.group_by_write_policy_with(request)
     }
-
 
     pub fn roll_up_to_write_policy(self) -> Self {
         self.roll_up_to_write_policy_with(crate::Q::write_policies().unlimited())
@@ -2435,14 +2525,19 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn unselect_write_policy(mut self) -> Self {
-        self.query.projection.retain(|field| field != "write_policy_id");
-        self.query.relations.retain(|relation| relation.name != "write_policy");
+        self.query
+            .projection
+            .retain(|field| field != "write_policy_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "write_policy");
         self
     }
 
-
     pub fn filter_by_blob_store(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("blob_store_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("blob_store_id", value.entity_id_value()));
         self
     }
 
@@ -2454,10 +2549,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store", selection));
+        self.relation_filters
+            .push(RelationFilter::new("blob_store", selection));
         self
     }
-
 
     pub fn without_blob_store_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -2467,10 +2562,10 @@ impl<R> RepositoryConfigurationRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store", selection));
+        self.relation_filters
+            .push(RelationFilter::new("blob_store", selection));
         self
     }
-
 
     pub fn have_blob_store(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("blob_store_id"));
@@ -2481,7 +2576,6 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("blob_store_id"));
         self
     }
-
 
     pub fn group_by_blob_store(self) -> Self {
         self.group_by("blob_store_id")
@@ -2516,13 +2610,14 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn group_by_blob_store_with_details(self) -> Self {
-        self.group_by_blob_store_with_details_from(crate::Q::blob_store_configurations().unlimited())
+        self.group_by_blob_store_with_details_from(
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
     pub fn group_by_blob_store_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
         self.group_by_blob_store_with(request)
     }
-
 
     pub fn roll_up_to_blob_store(self) -> Self {
         self.roll_up_to_blob_store_with(crate::Q::blob_store_configurations().unlimited())
@@ -2543,237 +2638,161 @@ impl<R> RepositoryConfigurationRequest<R> {
     }
 
     pub fn unselect_blob_store(mut self) -> Self {
-        self.query.projection.retain(|field| field != "blob_store_id");
-        self.query.relations.retain(|relation| relation.name != "blob_store");
+        self.query
+            .projection
+            .retain(|field| field != "blob_store_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "blob_store");
         self
     }
-    pub fn repository_type_is_hosted(self) -> Self {
-        self.filter_by_repository_type(1001_u64)
-    }
-
     pub fn with_repository_type_is_hosted(self) -> Self {
         self.filter_by_repository_type(1001_u64)
     }
 
-
-
     pub fn with_repository_type_is_not_hosted(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_type_id", 1001_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_type_id", 1001_u64));
         self
-    }
-
-
-    pub fn repository_type_is_proxy(self) -> Self {
-        self.filter_by_repository_type(1002_u64)
     }
 
     pub fn with_repository_type_is_proxy(self) -> Self {
         self.filter_by_repository_type(1002_u64)
     }
 
-
-
     pub fn with_repository_type_is_not_proxy(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_type_id", 1002_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_type_id", 1002_u64));
         self
-    }
-
-
-    pub fn repository_type_is_group(self) -> Self {
-        self.filter_by_repository_type(1003_u64)
     }
 
     pub fn with_repository_type_is_group(self) -> Self {
         self.filter_by_repository_type(1003_u64)
     }
 
-
-
     pub fn with_repository_type_is_not_group(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_type_id", 1003_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_type_id", 1003_u64));
         self
-    }
-
-
-
-    pub fn repository_format_is_maven2(self) -> Self {
-        self.filter_by_repository_format(1001_u64)
     }
 
     pub fn with_repository_format_is_maven2(self) -> Self {
         self.filter_by_repository_format(1001_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_maven2(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1001_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1001_u64));
         self
-    }
-
-
-    pub fn repository_format_is_raw(self) -> Self {
-        self.filter_by_repository_format(1002_u64)
     }
 
     pub fn with_repository_format_is_raw(self) -> Self {
         self.filter_by_repository_format(1002_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_raw(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1002_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1002_u64));
         self
-    }
-
-
-    pub fn repository_format_is_docker(self) -> Self {
-        self.filter_by_repository_format(1003_u64)
     }
 
     pub fn with_repository_format_is_docker(self) -> Self {
         self.filter_by_repository_format(1003_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_docker(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1003_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1003_u64));
         self
-    }
-
-
-    pub fn repository_format_is_npm(self) -> Self {
-        self.filter_by_repository_format(1004_u64)
     }
 
     pub fn with_repository_format_is_npm(self) -> Self {
         self.filter_by_repository_format(1004_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_npm(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1004_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1004_u64));
         self
-    }
-
-
-    pub fn repository_format_is_pypi(self) -> Self {
-        self.filter_by_repository_format(1005_u64)
     }
 
     pub fn with_repository_format_is_pypi(self) -> Self {
         self.filter_by_repository_format(1005_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_pypi(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1005_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1005_u64));
         self
-    }
-
-
-    pub fn repository_format_is_gomod(self) -> Self {
-        self.filter_by_repository_format(1006_u64)
     }
 
     pub fn with_repository_format_is_gomod(self) -> Self {
         self.filter_by_repository_format(1006_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_gomod(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1006_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1006_u64));
         self
-    }
-
-
-    pub fn repository_format_is_cargo(self) -> Self {
-        self.filter_by_repository_format(1007_u64)
     }
 
     pub fn with_repository_format_is_cargo(self) -> Self {
         self.filter_by_repository_format(1007_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_cargo(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1007_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1007_u64));
         self
-    }
-
-
-    pub fn repository_format_is_nuget(self) -> Self {
-        self.filter_by_repository_format(1008_u64)
     }
 
     pub fn with_repository_format_is_nuget(self) -> Self {
         self.filter_by_repository_format(1008_u64)
     }
 
-
-
     pub fn with_repository_format_is_not_nuget(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::ne("repository_format_id", 1008_u64));
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1008_u64));
         self
-    }
-
-
-
-    pub fn write_policy_is_allow_write(self) -> Self {
-        self.filter_by_write_policy(1001_u64)
     }
 
     pub fn with_write_policy_is_allow_write(self) -> Self {
         self.filter_by_write_policy(1001_u64)
     }
 
-
-
     pub fn with_write_policy_is_not_allow_write(mut self) -> Self {
         self.query = self.query.and_filter(Expr::ne("write_policy_id", 1001_u64));
         self
-    }
-
-
-    pub fn write_policy_is_allow_once(self) -> Self {
-        self.filter_by_write_policy(1002_u64)
     }
 
     pub fn with_write_policy_is_allow_once(self) -> Self {
         self.filter_by_write_policy(1002_u64)
     }
 
-
-
     pub fn with_write_policy_is_not_allow_once(mut self) -> Self {
         self.query = self.query.and_filter(Expr::ne("write_policy_id", 1002_u64));
         self
-    }
-
-
-    pub fn write_policy_is_read_only(self) -> Self {
-        self.filter_by_write_policy(1003_u64)
     }
 
     pub fn with_write_policy_is_read_only(self) -> Self {
         self.filter_by_write_policy(1003_u64)
     }
 
-
-
     pub fn with_write_policy_is_not_read_only(mut self) -> Self {
         self.query = self.query.and_filter(Expr::ne("write_policy_id", 1003_u64));
         self
     }
-
-
-
 
     pub fn select_tenant(mut self) -> Self {
         self.query = self.query.relation("tenant");
@@ -2782,12 +2801,15 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn select_tenant_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tenant", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tenant", selection));
+        self.query = self.query.relation_query("tenant", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_tenant_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_tenant_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_tenant_as_with_options(facet_name, request, true)
     }
 
@@ -2813,12 +2835,17 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn select_repository_type_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("repository_type", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("repository_type", selection));
+        self.query = self
+            .query
+            .relation_query("repository_type", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_repository_type_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_repository_type_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_repository_type_as_with_options(facet_name, request, true)
     }
 
@@ -2844,12 +2871,17 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn select_repository_format_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("repository_format", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("repository_format", selection));
+        self.query = self
+            .query
+            .relation_query("repository_format", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_repository_format_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_repository_format_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_repository_format_as_with_options(facet_name, request, true)
     }
 
@@ -2875,12 +2907,17 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn select_write_policy_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("write_policy", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("write_policy", selection));
+        self.query = self
+            .query
+            .relation_query("write_policy", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_write_policy_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_write_policy_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_write_policy_as_with_options(facet_name, request, true)
     }
 
@@ -2906,12 +2943,17 @@ impl<R> RepositoryConfigurationRequest<R> {
 
     pub fn select_blob_store_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("blob_store", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("blob_store", selection));
+        self.query = self
+            .query
+            .relation_query("blob_store", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_blob_store_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_blob_store_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_blob_store_as_with_options(facet_name, request, true)
     }
 
@@ -2937,13 +2979,13 @@ impl<R> Default for RepositoryConfigurationRequest<R> {
     }
 }
 
-impl<R> From< RepositoryConfigurationRequest<R> > for SelectQuery {
+impl<R> From<RepositoryConfigurationRequest<R>> for SelectQuery {
     fn from(request: RepositoryConfigurationRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< RepositoryConfigurationRequest<R> > for QuerySelection {
+impl<R> From<RepositoryConfigurationRequest<R>> for QuerySelection {
     fn from(request: RepositoryConfigurationRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -2955,14 +2997,20 @@ impl<R> From< RepositoryConfigurationRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::RepositoryConfiguration> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C>
+    for teaql_core::Audited<crate::RepositoryConfiguration>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::RepositoryConfiguration;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -2975,98 +3023,173 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<RepositoryConfigurationRequest<
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::RepositoryConfiguration
+    pub fn new_entity<C>(&self, context: &C) -> crate::RepositoryConfiguration
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::RepositoryConfiguration::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::RepositoryConfiguration::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity = crate::RepositoryConfiguration::runtime_new(
+            context.user_context().entity_runtime_state(),
+        );
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::RepositoryConfiguration::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> RepositoryConfigurationRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        bool,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        u64,
+        crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::RepositoryConfigurationRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> ContentRepositoryRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .content_repository_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,65 @@ impl<R> ContentRepositoryRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        SmartList<teaql_core::CompactRow>,
+        TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .content_repository_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>,
+        TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .content_repository_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +181,8 @@ impl<R> ContentRepositoryRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +190,30 @@ impl<R> ContentRepositoryRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
@@ -187,23 +221,39 @@ impl<R> ContentRepositoryRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .content_repository_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +265,21 @@ impl<R> ContentRepositoryRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for ContentRepository is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for ContentRepository is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .content_repository_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +287,6 @@ impl<R> ContentRepositoryRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .content_repository_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +342,11 @@ impl<R> ContentRepositoryRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +356,12 @@ impl<R> ContentRepositoryRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +378,6 @@ impl<R> ContentRepositoryRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +398,9 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -486,6 +510,7 @@ impl<R> ContentRepositoryRequest<R> {
             "repository_id" => Some("repository_id"),
             "format_name" => Some("format_name"),
             "version" => Some("version"),
+            "tenant" | "tenant_id" => Some("tenant_id"),
             _ => None,
         }
     }
@@ -493,18 +518,15 @@ impl<R> ContentRepositoryRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "component_list" => {
-                self.with_component_list_matching(
-                    crate::Q::components_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "asset_list" => {
-                self.with_asset_list_matching(
-                    crate::Q::assets_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "tenant" => self.with_tenant_matching(
+                crate::Q::tenants_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "component_list" => self.with_component_list_matching(
+                crate::Q::components_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "asset_list" => self.with_asset_list_matching(
+                crate::Q::assets_minimal().apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -578,6 +600,31 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
+        self
+    }
+
     pub fn top(self, top_n: u64) -> Self {
         self.limit(top_n)
     }
@@ -613,6 +660,7 @@ impl<R> ContentRepositoryRequest<R> {
         self.query = self.query.project("repository_id");
         self.query = self.query.project("format_name");
         self.query = self.query.project("version");
+        self.query = self.query.project("tenant_id");
         self
     }
 
@@ -625,7 +673,9 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn select_all(self) -> Self {
-        self.select_self()
+        let mut request = self.select_self();
+        request = request.select_tenant();
+        request
     }
 
     pub fn select_children(self) -> Self {
@@ -644,12 +694,24 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -689,12 +751,20 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -725,7 +795,9 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -741,9 +813,7 @@ impl<R> ContentRepositoryRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -796,7 +866,6 @@ impl<R> ContentRepositoryRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -814,19 +883,13 @@ impl<R> ContentRepositoryRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -837,10 +900,9 @@ impl<R> ContentRepositoryRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -848,10 +910,9 @@ impl<R> ContentRepositoryRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -874,7 +935,6 @@ impl<R> ContentRepositoryRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_repository_id(mut self) -> Self {
         self.query = self.query.project("repository_id");
@@ -979,10 +1039,15 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn square_root_of_population_standard_deviation_repository_id(self) -> Self {
-        self.square_root_of_population_standard_deviation_repository_id_as("stdDevPop_repository_id")
+        self.square_root_of_population_standard_deviation_repository_id_as(
+            "stdDevPop_repository_id",
+        )
     }
 
-    pub fn square_root_of_population_standard_deviation_repository_id_as(self, alias: impl Into<String>) -> Self {
+    pub fn square_root_of_population_standard_deviation_repository_id_as(
+        self,
+        alias: impl Into<String>,
+    ) -> Self {
         self.aggregate_stddev_pop("repository_id", alias)
     }
 
@@ -1003,11 +1068,14 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn unselect_repository_id(mut self) -> Self {
-        self.query.projection.retain(|field| field != "repository_id");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "repository_id");
+        self.query
+            .projection
+            .retain(|field| field != "repository_id");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "repository_id");
         self
     }
-
 
     pub fn with_repository_id(
         mut self,
@@ -1038,8 +1106,6 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-
-
     pub fn with_repository_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("repository_id", value));
         self
@@ -1050,7 +1116,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-    pub fn with_repository_id_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_repository_id_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("repository_id", value));
         self
     }
@@ -1060,7 +1129,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-    pub fn with_repository_id_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_repository_id_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("repository_id", value));
         self
     }
@@ -1070,7 +1142,9 @@ impl<R> ContentRepositoryRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("repository_id", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("repository_id", lower, upper));
         self
     }
 
@@ -1078,11 +1152,9 @@ impl<R> ContentRepositoryRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "repository_id",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("repository_id", range.start, range.end));
         self
     }
 
@@ -1123,13 +1195,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-
-
     pub fn with_repository_id_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("repository_id"));
         self
     }
-
 
     pub fn order_by_repository_id_asc(mut self) -> Self {
         self.query = self.query.order_asc("repository_id");
@@ -1150,7 +1219,6 @@ impl<R> ContentRepositoryRequest<R> {
         self.query = self.query.order_gbk_desc("repository_id");
         self
     }
-
 
     pub fn select_format_name(mut self) -> Self {
         self.query = self.query.project("format_name");
@@ -1236,10 +1304,11 @@ impl<R> ContentRepositoryRequest<R> {
 
     pub fn unselect_format_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "format_name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "format_name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "format_name");
         self
     }
-
 
     pub fn with_format_name(
         mut self,
@@ -1270,8 +1339,6 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-
-
     pub fn with_format_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("format_name", value));
         self
@@ -1282,7 +1349,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-    pub fn with_format_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_format_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("format_name", value));
         self
     }
@@ -1292,7 +1362,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-    pub fn with_format_name_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_format_name_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("format_name", value));
         self
     }
@@ -1302,7 +1375,9 @@ impl<R> ContentRepositoryRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("format_name", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("format_name", lower, upper));
         self
     }
 
@@ -1310,11 +1385,9 @@ impl<R> ContentRepositoryRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "format_name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("format_name", range.start, range.end));
         self
     }
 
@@ -1346,17 +1419,23 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn with_format_name_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("format_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("format_name", value));
         self
     }
 
     pub fn with_format_name_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("format_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("format_name", value));
         self
     }
 
     pub fn with_format_name_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("format_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("format_name", value));
         self
     }
 
@@ -1366,12 +1445,16 @@ impl<R> ContentRepositoryRequest<R> {
     }
 
     pub fn with_format_name_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("format_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("format_name", value));
         self
     }
 
     pub fn with_format_name_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("format_name", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("format_name", value));
         self
     }
     pub fn with_format_name_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1389,13 +1472,10 @@ impl<R> ContentRepositoryRequest<R> {
         self
     }
 
-
-
     pub fn with_format_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("format_name"));
         self
     }
-
 
     pub fn order_by_format_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("format_name");
@@ -1424,9 +1504,7 @@ impl<R> ContentRepositoryRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -1498,45 +1576,151 @@ impl<R> ContentRepositoryRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn repository_id_is_value_1l(self) -> Self {
-        self.with_repository_id_is("1l")
+    pub fn filter_by_tenant(mut self, value: impl EntityReference) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::eq("tenant_id", value.entity_id_value()));
+        self
     }
 
-    pub fn with_repository_id_is_value_1l(self) -> Self {
-        self.with_repository_id_is("1l")
+    pub fn with_tenant_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "tenant_id",
+            <crate::Tenant as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
+        self
     }
 
-
-
-    pub fn with_repository_id_is_not_value_1l(self) -> Self {
-        self.with_repository_id_is_not("1l")
+    pub fn without_tenant_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "tenant_id",
+            <crate::Tenant as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
+        self
     }
 
-
-
-    pub fn format_name_is_maven2(self) -> Self {
-        self.with_format_name_is("maven2")
+    pub fn have_tenant(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_not_null("tenant_id"));
+        self
     }
 
-    pub fn with_format_name_is_maven2(self) -> Self {
-        self.with_format_name_is("maven2")
+    pub fn have_no_tenant(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_null("tenant_id"));
+        self
     }
 
-
-
-    pub fn with_format_name_is_not_maven2(self) -> Self {
-        self.with_format_name_is_not("maven2")
+    pub fn group_by_tenant(self) -> Self {
+        self.group_by("tenant_id")
     }
 
+    pub fn group_by_tenant_as(self, alias: impl Into<String>) -> Self {
+        let alias = alias.into();
+        let mut request = self.group_by("tenant_id");
+        request.query = request.query.project_expr(alias, Expr::column("tenant_id"));
+        request
+    }
 
+    pub fn group_by_tenant_with_function(
+        self,
+        alias: impl Into<String>,
+        function: AggregateFunction,
+    ) -> Self {
+        self.group_by("tenant_id")
+            .aggregate_with_function("tenant_id", alias, function)
+    }
 
+    pub fn group_by_tenant_with(mut self, request: impl Into<QuerySelection>) -> Self {
+        self.query = self.query.group_by("tenant_id");
+        self.query_options.object_group_bys.push(ObjectGroupBy::new(
+            "tenant",
+            "tenant_id",
+            request,
+        ));
+        self
+    }
 
+    pub fn group_by_tenant_with_details(self) -> Self {
+        self.group_by_tenant_with_details_from(crate::Q::tenants().unlimited())
+    }
+
+    pub fn group_by_tenant_with_details_from(self, request: impl Into<QuerySelection>) -> Self {
+        self.group_by_tenant_with(request)
+    }
+
+    pub fn roll_up_to_tenant(self) -> Self {
+        self.roll_up_to_tenant_with(crate::Q::tenants().unlimited())
+    }
+
+    pub fn roll_up_to_tenant_with(self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.with_tenant_matching(selection.clone())
+            .group_by_tenant_with(selection)
+    }
+
+    pub fn count_tenant(self) -> Self {
+        self.count_tenant_as("tenant_count")
+    }
+
+    pub fn count_tenant_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count_field("tenant_id", alias)
+    }
+
+    pub fn unselect_tenant(mut self) -> Self {
+        self.query.projection.retain(|field| field != "tenant_id");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "tenant");
+        self
+    }
+    pub fn select_tenant(mut self) -> Self {
+        self.query = self.query.relation("tenant");
+        self
+    }
+
+    pub fn select_tenant_with(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self.query.relation_query("tenant", selection.into_query());
+        self
+    }
+
+    pub fn facet_by_tenant_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.facet_by_tenant_as_with_options(facet_name, request, true)
+    }
+
+    pub fn facet_by_tenant_as_with_options(
+        mut self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+        include_all_facets: bool,
+    ) -> Self {
+        self.query_options.facets.push(FacetRequest::new(
+            facet_name,
+            "tenant",
+            request,
+            include_all_facets,
+        ));
+        self
+    }
     pub fn have_components(self) -> Self {
-        self.with_component_list_matching(SelectQuery::new("Component"))
+        self.with_component_list_matching(crate::Q::components_minimal())
     }
 
     pub fn have_no_components(self) -> Self {
-        self.without_component_list_matching(SelectQuery::new("Component"))
+        self.without_component_list_matching(crate::Q::components_minimal())
     }
 
     pub fn with_component_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -1547,7 +1731,8 @@ impl<R> ContentRepositoryRequest<R> {
             selection.query.clone(),
             "content_repository_id",
         ));
-        self.relation_filters.push(RelationFilter::new("component_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("component_list", selection));
         self
     }
 
@@ -1559,7 +1744,8 @@ impl<R> ContentRepositoryRequest<R> {
             selection.query.clone(),
             "content_repository_id",
         ));
-        self.relation_filters.push(RelationFilter::new("component_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("component_list", selection));
         self
     }
 
@@ -1570,17 +1756,18 @@ impl<R> ContentRepositoryRequest<R> {
 
     pub fn select_component_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("component_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("component_list", selection));
+        self.query = self
+            .query
+            .relation_query("component_list", selection.into_query());
         self
-}
+    }
 
     pub fn have_assets(self) -> Self {
-        self.with_asset_list_matching(SelectQuery::new("Asset"))
+        self.with_asset_list_matching(crate::Q::assets_minimal())
     }
 
     pub fn have_no_assets(self) -> Self {
-        self.without_asset_list_matching(SelectQuery::new("Asset"))
+        self.without_asset_list_matching(crate::Q::assets_minimal())
     }
 
     pub fn with_asset_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -1591,7 +1778,8 @@ impl<R> ContentRepositoryRequest<R> {
             selection.query.clone(),
             "content_repository_id",
         ));
-        self.relation_filters.push(RelationFilter::new("asset_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("asset_list", selection));
         self
     }
 
@@ -1603,7 +1791,8 @@ impl<R> ContentRepositoryRequest<R> {
             selection.query.clone(),
             "content_repository_id",
         ));
-        self.relation_filters.push(RelationFilter::new("asset_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("asset_list", selection));
         self
     }
 
@@ -1614,10 +1803,11 @@ impl<R> ContentRepositoryRequest<R> {
 
     pub fn select_asset_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("asset_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("asset_list", selection));
+        self.query = self
+            .query
+            .relation_query("asset_list", selection.into_query());
         self
-}
+    }
     pub fn count_components(self) -> Self {
         self.count_components_as("count_components")
     }
@@ -1626,14 +1816,20 @@ impl<R> ContentRepositoryRequest<R> {
         self.count_components_with(alias, crate::Q::components().unlimited())
     }
 
-    pub fn count_components_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_components_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "component_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "component_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -1641,23 +1837,43 @@ impl<R> ContentRepositoryRequest<R> {
         self.stats_from_components_as("refinements", request)
     }
 
-    pub fn stats_from_components_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_components_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "component_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "component_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_components_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "component_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
     pub fn group_by_components_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_components(request)
     }
-
-
-
 
     pub fn count_assets(self) -> Self {
         self.count_assets_as("count_assets")
@@ -1667,14 +1883,15 @@ impl<R> ContentRepositoryRequest<R> {
         self.count_assets_with(alias, crate::Q::assets().unlimited())
     }
 
-    pub fn count_assets_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_assets_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "asset_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new("asset_list", alias, selection, true));
         self
     }
 
@@ -1682,14 +1899,32 @@ impl<R> ContentRepositoryRequest<R> {
         self.stats_from_assets_as("refinements", request)
     }
 
-    pub fn stats_from_assets_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_assets_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "asset_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "asset_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_assets_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new("asset_list", alias, selection, true));
         self
     }
 
@@ -1697,62 +1932,165 @@ impl<R> ContentRepositoryRequest<R> {
         self.stats_from_assets(request)
     }
 
-
     pub fn sum_component_id_of_assets(self) -> Self {
-        self.sum_component_id_of_assets_as("sum_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sum_component_id_of_assets_as(
+            "sum_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sum_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().sum("component_id", "sum_component_id"))
+    pub fn sum_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("component_id", "sum_component_id"),
+        )
     }
     pub fn min_component_id_of_assets(self) -> Self {
-        self.min_component_id_of_assets_as("min_component_id_of_assets", crate::Q::assets().unlimited())
+        self.min_component_id_of_assets_as(
+            "min_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn min_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().min("component_id", "min_component_id"))
+    pub fn min_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("component_id", "min_component_id"),
+        )
     }
     pub fn max_component_id_of_assets(self) -> Self {
-        self.max_component_id_of_assets_as("max_component_id_of_assets", crate::Q::assets().unlimited())
+        self.max_component_id_of_assets_as(
+            "max_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn max_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().max("component_id", "max_component_id"))
+    pub fn max_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("component_id", "max_component_id"),
+        )
     }
     pub fn avg_component_id_of_assets(self) -> Self {
-        self.avg_component_id_of_assets_as("avg_component_id_of_assets", crate::Q::assets().unlimited())
+        self.avg_component_id_of_assets_as(
+            "avg_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn avg_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().avg("component_id", "avg_component_id"))
+    pub fn avg_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("component_id", "avg_component_id"),
+        )
     }
     pub fn standard_deviation_component_id_of_assets(self) -> Self {
-        self.standard_deviation_component_id_of_assets_as("standard_deviation_component_id_of_assets", crate::Q::assets().unlimited())
+        self.standard_deviation_component_id_of_assets_as(
+            "standard_deviation_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().stddev("component_id", "stdDev_component_id"))
+    pub fn standard_deviation_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("component_id", "stdDev_component_id"),
+        )
     }
     pub fn square_root_of_population_standard_deviation_component_id_of_assets(self) -> Self {
-        self.square_root_of_population_standard_deviation_component_id_of_assets_as("square_root_of_population_standard_deviation_component_id_of_assets", crate::Q::assets().unlimited())
+        self.square_root_of_population_standard_deviation_component_id_of_assets_as(
+            "square_root_of_population_standard_deviation_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn square_root_of_population_standard_deviation_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().stddev_pop("component_id", "stdDevPop_component_id"))
+    pub fn square_root_of_population_standard_deviation_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("component_id", "stdDevPop_component_id"),
+        )
     }
     pub fn sample_variance_component_id_of_assets(self) -> Self {
-        self.sample_variance_component_id_of_assets_as("sample_variance_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sample_variance_component_id_of_assets_as(
+            "sample_variance_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sample_variance_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().var_samp("component_id", "varSamp_component_id"))
+    pub fn sample_variance_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("component_id", "varSamp_component_id"),
+        )
     }
     pub fn sample_population_variance_component_id_of_assets(self) -> Self {
-        self.sample_population_variance_component_id_of_assets_as("sample_population_variance_component_id_of_assets", crate::Q::assets().unlimited())
+        self.sample_population_variance_component_id_of_assets_as(
+            "sample_population_variance_component_id_of_assets",
+            crate::Q::assets().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_component_id_of_assets_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_assets_as(alias, request.into().into_query().var_pop("component_id", "varPop_component_id"))
+    pub fn sample_population_variance_component_id_of_assets_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_assets_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("component_id", "varPop_component_id"),
+        )
     }
 }
 
@@ -1762,13 +2100,13 @@ impl<R> Default for ContentRepositoryRequest<R> {
     }
 }
 
-impl<R> From< ContentRepositoryRequest<R> > for SelectQuery {
+impl<R> From<ContentRepositoryRequest<R>> for SelectQuery {
     fn from(request: ContentRepositoryRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< ContentRepositoryRequest<R> > for QuerySelection {
+impl<R> From<ContentRepositoryRequest<R>> for QuerySelection {
     fn from(request: ContentRepositoryRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -1780,14 +2118,20 @@ impl<R> From< ContentRepositoryRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::ContentRepository> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C>
+    for teaql_core::Audited<crate::ContentRepository>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::ContentRepository;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -1800,98 +2144,172 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<ContentRepositoryRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::ContentRepository
+    pub fn new_entity<C>(&self, context: &C) -> crate::ContentRepository
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::ContentRepository::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::ContentRepository::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity =
+            crate::ContentRepository::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::ContentRepository::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> ContentRepositoryRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        bool,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        u64,
+        crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::ContentRepositoryRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

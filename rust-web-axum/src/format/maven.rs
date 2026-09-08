@@ -81,8 +81,7 @@ pub fn generate_maven_metadata_xml(
     let latest = versions.last().cloned().unwrap_or_default();
     let release = versions
         .iter()
-        .filter(|v| !v.to_uppercase().ends_with("-SNAPSHOT"))
-        .last()
+        .rfind(|v| !v.to_uppercase().ends_with("-SNAPSHOT"))
         .cloned()
         .unwrap_or_else(|| latest.clone());
 

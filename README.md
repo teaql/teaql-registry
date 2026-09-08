@@ -68,15 +68,26 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
     - *Code-only dependencies (100–200 NPM/Cargo/PyPI/Go/Java modules)*: ~100MB – 300MB RAM.
     - *Containers & binaries (30–50 microservice images / executables)*: ~1GB – 3GB RAM.
   - **Recommendation**: For the vast majority of workflows, standard **filesystem storage** (or local S3) is the recommended default and fully sufficient, delivering sub-5ms latency via OS page cache without significant RAM overhead.
-- **Embedded Snowflake-Style Web Console**:
-  - Modern React 19 + TypeScript SPA embedded directly inside the binary (zero static file dependencies).
-  - Low cognitive load, instant package manager install snippet generators, and storage metrics.
+- **Embedded Web Console**:
+  - React 18 + TypeScript SPA embedded directly inside the binary (zero static file dependencies, no external font/CDN requests).
+  - Repository management, artifact search with install snippet generators, storage ops (GC / retention cleanup), access token management, and service log viewer.
 - **Standalone Terminal TUI Client (`registry-tui`)**:
-  - Zero-dependency, 2.6MB single static binary built with Ratatui for SSH jump host / bastion environments.
+  - Zero-dependency, 2.6 MB single static binary built with Ratatui.
+  - Designed for SSH jump host / bastion environments where browser access is unavailable.
+  - Interactive login with password masking, connection verification before entering the UI.
+  - Tabs: Overview & Metrics, Repositories, Artifact Search, Quick Ops (GC, cleanup, token generation).
+- **Per-Tenant Service Logs**:
+  - Audit trail for all artifact upload/download operations across all 8 formats.
+  - Records event time, username, client IP, action, repository, artifact path, content size, and status.
+  - Two log types: `service` (user-facing operations) and `system` (internal errors).
+  - Queryable via REST API and viewable in both Web Console and TUI.
 - **Automated Lifecycle Governance & GC**:
   - Retention policies (keep latest N versions, snapshot cleanup) and physical orphaned blob deletion.
 - **CI/CD Security & Integration**:
   - Personal Access Tokens (`tql_pat_*`) with scope enforcement and HMAC-signed webhook event delivery.
+  - Randomized admin credentials on first startup (no default passwords shipped).
+- **Multi-Tenancy**:
+  - Row-level tenant isolation with automated tenant provisioning and per-tenant credential generation.
 - **Polymorphic Storage Engine**:
   - Pluggable S3-compatible backend (RustFS / MinIO / AWS S3), POSIX filesystem, or in-memory storage with content-addressed SHA-256 deduplication.
 
@@ -86,8 +97,8 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
 
 ```text
 teaql-registry/
-├── console/             # Snowflake-style React 19 + TypeScript web console
-├── registry-tui/        # Standalone terminal TUI client (registry-tui)
+├── console/             # React 18 + TypeScript web console (embedded in binary)
+├── registry-tui/        # Standalone terminal TUI client (ratatui)
 ├── models/              # TeaQL domain entity and metadata schema (model.xml)
 ├── rust-lib-core/       # Type-safe model operations & audited data layer (teaql-registry-core)
 ├── rust-web-axum/       # Protocol engines, S3 storage, REST APIs & embedded UI (teaql-registry)
@@ -106,22 +117,54 @@ docker compose up -d
 ```
 
 Service endpoints will be available at:
-- **Web Console**: `http://localhost:8081/` (Default credentials: `admin` / `admin123`)
+- **Web Console**: `http://localhost:8081/`
 - **REST API**: `http://localhost:8081/service/rest/v1/...`
 - **Prometheus Metrics**: `http://localhost:8081/metrics`
 - **S3 Object Storage (RustFS)**: `http://localhost:9010`
+- **Quick Start Help**: `http://localhost:8081/help` (plain-text guide with all API endpoints and env vars)
+
+> **Credentials**: Admin password is randomly generated on first startup and written to
+> `/var/lib/teaql-registry/credentials/global-admin.txt` (directory `0700`, file `0600`).
+> Set `CREDENTIALS_DIR` to customize this path. To use a fixed password, set `ADMIN_PASSWORD` env var before first startup.
+> Tenant credentials are written to the same directory.
 
 ### 2. Run the Terminal TUI Client (`registry-tui`)
 
 Designed for bastion hosts and SSH sessions where browser HTTP access is restricted:
 
 ```bash
-# Run directly via Cargo
-cargo run --release -p registry-tui
+# Build the TUI client
+cargo build --release -p registry-tui
 
-# Connect to a remote internal endpoint with a Personal Access Token
-registry-tui --endpoint http://10.0.0.10:8081 --token tql_pat_xxx
+# Interactive login (password hidden)
+registry-tui --endpoint http://10.0.0.10:8081
+
+# Or provide credentials directly
+registry-tui -e http://10.0.0.10:8081 -u admin -p <password>
+
+# Or use a Personal Access Token
+registry-tui -e http://10.0.0.10:8081 --token tql_pat_xxx
+
+# Credentials can also be set via environment variables
+export REGISTRY_ENDPOINT=http://10.0.0.10:8081
+export REGISTRY_USER=admin
+export REGISTRY_PASSWORD=<password>
+registry-tui
 ```
+
+**TUI Controls**:
+
+| Key | Action |
+|---|---|
+| `1`-`4` | Switch tabs |
+| `Tab` / `Shift+Tab` | Cycle tabs |
+| `/` | Search artifacts |
+| `j`/`k` or `↑`/`↓` | Navigate lists |
+| `r` | Refresh data |
+| `g` | Run garbage collection |
+| `c` | Run retention cleanup |
+| `t` | Generate temporary token |
+| `q` | Quit |
 
 ### 3. Seed Demo Packages (All 8 Formats)
 
@@ -137,9 +180,9 @@ Publish live sample artifacts across all 8 ecosystems in one command:
 docker compose up -d postgres rustfs
 
 # 2. Configure environment and launch service
-export TEAQL_REGISTRY_CORE_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nexus_db"
-export TEAQL_REGISTRY_CORE_DATABASE_USER="postgres"
-export TEAQL_REGISTRY_CORE_DATABASE_PASSWORD="postgres"
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL="postgresql://localhost:5432/nexus_db"
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER="postgres"
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD="postgres"
 export S3_ENDPOINT="http://127.0.0.1:9010"
 export S3_ACCESS_KEY="rustfsadmin"
 export S3_SECRET_KEY="rustfsadmin"
@@ -147,7 +190,7 @@ export S3_BUCKET="teaql-blobs"
 export S3_REGION="us-east-1"
 export PORT=8081
 
-cargo run --bin teaql-registry
+cargo run --release -p teaql-registry
 ```
 
 ### 5. Pure In-Memory High-Performance Mode
@@ -156,17 +199,40 @@ cargo run --bin teaql-registry
 
 ```bash
 # Via CLI flag
-cargo run --bin teaql-registry -- --memory-mode
+cargo run --release -p teaql-registry -- --memory-mode
 
 # Or via environment variable
-MEMORY_MODE=true cargo run --bin teaql-registry
+MEMORY_MODE=true cargo run --release -p teaql-registry
 ```
 
 ### 6. Run the Test Suite
 
 ```bash
-cargo test -- --test-threads=1
+# Server-side tests (requires PostgreSQL)
+cargo test -p teaql-registry -- --test-threads=1
+
+# TUI client tests (no dependencies, uses mock API)
+cargo test -p registry-tui
 ```
+
+---
+
+## REST API Overview
+
+| Endpoint | Description |
+|---|---|
+| `GET /help` | Plain-text quick start guide |
+| `GET /service/rest/v1/repositories` | List all repositories |
+| `POST /service/rest/v1/repositories/{format}/{type}` | Create a repository |
+| `GET /service/rest/v1/search` | Search artifacts |
+| `GET /service/rest/v1/blobstores` | List blob stores |
+| `POST /service/rest/v1/gc/run` | Run garbage collection |
+| `POST /service/rest/v1/cleanup/run` | Run retention cleanup |
+| `GET /service/rest/v1/tokens` | List access tokens |
+| `POST /service/rest/v1/tokens` | Create access token |
+| `DELETE /service/rest/v1/tokens/{id}` | Revoke access token |
+| `GET /service/rest/v1/service-logs` | Query service logs |
+| `GET /metrics` | Prometheus metrics |
 
 ---
 

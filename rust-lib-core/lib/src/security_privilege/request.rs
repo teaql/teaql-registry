@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .security_privilege_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,65 @@ impl<R> SecurityPrivilegeRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        SmartList<teaql_core::CompactRow>,
+        TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .security_privilege_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>,
+        TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .security_privilege_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +181,8 @@ impl<R> SecurityPrivilegeRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +190,30 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
@@ -187,23 +221,39 @@ impl<R> SecurityPrivilegeRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .security_privilege_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +265,21 @@ impl<R> SecurityPrivilegeRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for SecurityPrivilege is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for SecurityPrivilege is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .security_privilege_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +287,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .security_privilege_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +342,11 @@ impl<R> SecurityPrivilegeRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +356,12 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +378,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +398,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -498,12 +522,12 @@ impl<R> SecurityPrivilegeRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "tenant" => {
-                self.with_tenant_matching(
-                    crate::Q::tenants_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "tenant" => self.with_tenant_matching(
+                crate::Q::tenants_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_role_privilege_list" => self.with_security_role_privilege_list_matching(
+                crate::Q::security_role_privileges_minimal().apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -577,6 +601,31 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
+        self
+    }
+
     pub fn top(self, top_n: u64) -> Self {
         self.limit(top_n)
     }
@@ -635,7 +684,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn select_children(self) -> Self {
-        self.select_all()
+        let mut request = self.select_all();
+        request = request.select_security_role_privilege_list();
+        request
     }
 
     pub fn select_any(self) -> Self {
@@ -647,12 +698,24 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -692,12 +755,20 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -728,7 +799,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -744,9 +817,7 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -799,7 +870,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -817,19 +887,13 @@ impl<R> SecurityPrivilegeRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -840,10 +904,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -851,10 +914,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -877,7 +939,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_privilege_id(mut self) -> Self {
         self.query = self.query.project("privilege_id");
@@ -962,11 +1023,14 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn unselect_privilege_id(mut self) -> Self {
-        self.query.projection.retain(|field| field != "privilege_id");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "privilege_id");
+        self.query
+            .projection
+            .retain(|field| field != "privilege_id");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "privilege_id");
         self
     }
-
 
     pub fn with_privilege_id(
         mut self,
@@ -997,8 +1061,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_privilege_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("privilege_id", value));
         self
@@ -1009,7 +1071,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_privilege_id_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_privilege_id_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("privilege_id", value));
         self
     }
@@ -1019,7 +1084,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_privilege_id_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_privilege_id_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("privilege_id", value));
         self
     }
@@ -1029,7 +1097,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("privilege_id", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("privilege_id", lower, upper));
         self
     }
 
@@ -1037,11 +1107,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "privilege_id",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("privilege_id", range.start, range.end));
         self
     }
 
@@ -1073,17 +1141,23 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_privilege_id_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("privilege_id", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("privilege_id", value));
         self
     }
 
     pub fn with_privilege_id_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("privilege_id", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("privilege_id", value));
         self
     }
 
     pub fn with_privilege_id_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("privilege_id", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("privilege_id", value));
         self
     }
 
@@ -1093,12 +1167,16 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_privilege_id_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("privilege_id", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("privilege_id", value));
         self
     }
 
     pub fn with_privilege_id_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("privilege_id", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("privilege_id", value));
         self
     }
     pub fn with_privilege_id_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1116,13 +1194,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_privilege_id_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("privilege_id"));
         self
     }
-
 
     pub fn order_by_privilege_id_asc(mut self) -> Self {
         self.query = self.query.order_asc("privilege_id");
@@ -1143,7 +1218,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.query = self.query.order_gbk_desc("privilege_id");
         self
     }
-
 
     pub fn select_name(mut self) -> Self {
         self.query = self.query.project("name");
@@ -1172,9 +1246,7 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn group_by_name_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("name");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("name"));
+        request.query = request.query.project_expr(alias, Expr::column("name"));
         request
     }
 
@@ -1229,10 +1301,11 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn unselect_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "name");
         self
     }
-
 
     pub fn with_name(
         mut self,
@@ -1263,8 +1336,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("name", value));
         self
@@ -1275,7 +1346,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("name", value));
         self
     }
@@ -1303,11 +1377,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("name", range.start, range.end));
         self
     }
 
@@ -1315,10 +1387,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "name",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("name", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1382,13 +1453,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("name"));
         self
     }
-
 
     pub fn order_by_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("name");
@@ -1409,7 +1477,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.query = self.query.order_gbk_desc("name");
         self
     }
-
 
     pub fn select_description(mut self) -> Self {
         self.query = self.query.project("description");
@@ -1495,10 +1562,11 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn unselect_description(mut self) -> Self {
         self.query.projection.retain(|field| field != "description");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "description");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "description");
         self
     }
-
 
     pub fn with_description(
         mut self,
@@ -1529,8 +1597,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_description_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("description", value));
         self
@@ -1541,7 +1607,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_description_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_description_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("description", value));
         self
     }
@@ -1551,7 +1620,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_description_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_description_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("description", value));
         self
     }
@@ -1561,7 +1633,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("description", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("description", lower, upper));
         self
     }
 
@@ -1569,11 +1643,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "description",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("description", range.start, range.end));
         self
     }
 
@@ -1605,17 +1677,23 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_description_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("description", value));
         self
     }
 
     pub fn with_description_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("description", value));
         self
     }
 
     pub fn with_description_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("description", value));
         self
     }
 
@@ -1625,12 +1703,16 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_description_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("description", value));
         self
     }
 
     pub fn with_description_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("description", value));
         self
     }
     pub fn with_description_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1648,13 +1730,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_description_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("description"));
         self
     }
-
 
     pub fn order_by_description_asc(mut self) -> Self {
         self.query = self.query.order_asc("description");
@@ -1676,7 +1755,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
     pub fn select_privilege_type(mut self) -> Self {
         self.query = self.query.project("privilege_type");
         self
@@ -1690,7 +1768,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.select_privilege_type_unsafe_raw(UnsafeRawSqlSegment::trusted(raw_sql_segment))
     }
 
-    pub fn select_privilege_type_unsafe_raw(mut self, raw_sql_segment: UnsafeRawSqlSegment) -> Self {
+    pub fn select_privilege_type_unsafe_raw(
+        mut self,
+        raw_sql_segment: UnsafeRawSqlSegment,
+    ) -> Self {
         self.query_options
             .raw_projections
             .push(RawProjection::new("privilege_type", raw_sql_segment));
@@ -1760,11 +1841,14 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn unselect_privilege_type(mut self) -> Self {
-        self.query.projection.retain(|field| field != "privilege_type");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "privilege_type");
+        self.query
+            .projection
+            .retain(|field| field != "privilege_type");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "privilege_type");
         self
     }
-
 
     pub fn with_privilege_type(
         mut self,
@@ -1795,8 +1879,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_privilege_type_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("privilege_type", value));
         self
@@ -1807,7 +1889,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_privilege_type_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_privilege_type_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("privilege_type", value));
         self
     }
@@ -1817,7 +1902,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-    pub fn with_privilege_type_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_privilege_type_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("privilege_type", value));
         self
     }
@@ -1827,7 +1915,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("privilege_type", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("privilege_type", lower, upper));
         self
     }
 
@@ -1835,11 +1925,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "privilege_type",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("privilege_type", range.start, range.end));
         self
     }
 
@@ -1866,37 +1954,54 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_privilege_type_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::contain("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::contain("privilege_type", value));
         self
     }
 
     pub fn with_privilege_type_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("privilege_type", value));
         self
     }
 
     pub fn with_privilege_type_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("privilege_type", value));
         self
     }
 
     pub fn with_privilege_type_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("privilege_type", value));
         self
     }
 
     pub fn with_privilege_type_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::end_with("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::end_with("privilege_type", value));
         self
     }
 
     pub fn with_privilege_type_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("privilege_type", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("privilege_type", value));
         self
     }
 
-    pub fn with_privilege_type_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("privilege_type", value));
+    pub fn with_privilege_type_sounding_like(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("privilege_type", value));
         self
     }
     pub fn with_privilege_type_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1914,13 +2019,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_privilege_type_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("privilege_type"));
         self
     }
-
 
     pub fn order_by_privilege_type_asc(mut self) -> Self {
         self.query = self.query.order_asc("privilege_type");
@@ -1942,7 +2044,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
     pub fn select_permission_pattern(mut self) -> Self {
         self.query = self.query.project("permission_pattern");
         self
@@ -1956,7 +2057,10 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.select_permission_pattern_unsafe_raw(UnsafeRawSqlSegment::trusted(raw_sql_segment))
     }
 
-    pub fn select_permission_pattern_unsafe_raw(mut self, raw_sql_segment: UnsafeRawSqlSegment) -> Self {
+    pub fn select_permission_pattern_unsafe_raw(
+        mut self,
+        raw_sql_segment: UnsafeRawSqlSegment,
+    ) -> Self {
         self.query_options
             .raw_projections
             .push(RawProjection::new("permission_pattern", raw_sql_segment));
@@ -1981,8 +2085,11 @@ impl<R> SecurityPrivilegeRequest<R> {
         alias: impl Into<String>,
         function: AggregateFunction,
     ) -> Self {
-        self.group_by("permission_pattern")
-            .aggregate_with_function("permission_pattern", alias, function)
+        self.group_by("permission_pattern").aggregate_with_function(
+            "permission_pattern",
+            alias,
+            function,
+        )
     }
 
     pub fn count_permission_pattern(self) -> Self {
@@ -2026,11 +2133,14 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn unselect_permission_pattern(mut self) -> Self {
-        self.query.projection.retain(|field| field != "permission_pattern");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "permission_pattern");
+        self.query
+            .projection
+            .retain(|field| field != "permission_pattern");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "permission_pattern");
         self
     }
-
 
     pub fn with_permission_pattern(
         mut self,
@@ -2061,30 +2171,44 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_permission_pattern_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("permission_pattern", value));
         self
     }
 
-    pub fn with_permission_pattern_greater_than(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_permission_pattern_greater_than(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gt("permission_pattern", value));
         self
     }
 
-    pub fn with_permission_pattern_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::gte("permission_pattern", value));
+    pub fn with_permission_pattern_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::gte("permission_pattern", value));
         self
     }
 
-    pub fn with_permission_pattern_less_than(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_permission_pattern_less_than(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lt("permission_pattern", value));
         self
     }
 
-    pub fn with_permission_pattern_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::lte("permission_pattern", value));
+    pub fn with_permission_pattern_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::lte("permission_pattern", value));
         self
     }
 
@@ -2093,7 +2217,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("permission_pattern", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("permission_pattern", lower, upper));
         self
     }
 
@@ -2101,11 +2227,9 @@ impl<R> SecurityPrivilegeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "permission_pattern",
-            range.start,
-            range.end,
-        ));
+        self.query =
+            self.query
+                .and_filter(Expr::between("permission_pattern", range.start, range.end));
         self
     }
 
@@ -2132,37 +2256,54 @@ impl<R> SecurityPrivilegeRequest<R> {
     }
 
     pub fn with_permission_pattern_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::contain("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::contain("permission_pattern", value));
         self
     }
 
     pub fn with_permission_pattern_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("permission_pattern", value));
         self
     }
 
     pub fn with_permission_pattern_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("permission_pattern", value));
         self
     }
 
     pub fn with_permission_pattern_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("permission_pattern", value));
         self
     }
 
     pub fn with_permission_pattern_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::end_with("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::end_with("permission_pattern", value));
         self
     }
 
     pub fn with_permission_pattern_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("permission_pattern", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("permission_pattern", value));
         self
     }
 
-    pub fn with_permission_pattern_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("permission_pattern", value));
+    pub fn with_permission_pattern_sounding_like(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("permission_pattern", value));
         self
     }
     pub fn with_permission_pattern_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -2180,13 +2321,12 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
-
     pub fn with_permission_pattern_is_known(mut self) -> Self {
-        self.query = self.query.and_filter(Expr::is_not_null("permission_pattern"));
+        self.query = self
+            .query
+            .and_filter(Expr::is_not_null("permission_pattern"));
         self
     }
-
 
     pub fn order_by_permission_pattern_asc(mut self) -> Self {
         self.query = self.query.order_asc("permission_pattern");
@@ -2207,7 +2347,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.query = self.query.order_gbk_desc("permission_pattern");
         self
     }
-
 
     pub fn select_read_only(mut self) -> Self {
         self.query = self.query.project("read_only");
@@ -2236,9 +2375,7 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn group_by_read_only_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("read_only");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("read_only"));
+        request.query = request.query.project_expr(alias, Expr::column("read_only"));
         request
     }
 
@@ -2293,7 +2430,9 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn unselect_read_only(mut self) -> Self {
         self.query.projection.retain(|field| field != "read_only");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "read_only");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "read_only");
         self
     }
 
@@ -2304,6 +2443,16 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn which_are_not_read_only(mut self) -> Self {
         self.query = self.query.and_filter(Expr::eq("read_only", false));
+        self
+    }
+
+    pub fn with_read_only_is_unknown(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_null("read_only"));
+        self
+    }
+
+    pub fn with_read_only_is_known(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_not_null("read_only"));
         self
     }
     pub fn order_by_read_only_asc(mut self) -> Self {
@@ -2333,9 +2482,7 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -2408,7 +2555,9 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
     pub fn filter_by_tenant(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("tenant_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("tenant_id", value.entity_id_value()));
         self
     }
 
@@ -2420,10 +2569,10 @@ impl<R> SecurityPrivilegeRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("tenant", selection));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
         self
     }
-
 
     pub fn without_tenant_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -2433,10 +2582,10 @@ impl<R> SecurityPrivilegeRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("tenant", selection));
+        self.relation_filters
+            .push(RelationFilter::new("tenant", selection));
         self
     }
-
 
     pub fn have_tenant(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("tenant_id"));
@@ -2448,7 +2597,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self
     }
 
-
     pub fn group_by_tenant(self) -> Self {
         self.group_by("tenant_id")
     }
@@ -2456,9 +2604,7 @@ impl<R> SecurityPrivilegeRequest<R> {
     pub fn group_by_tenant_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("tenant_id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("tenant_id"));
+        request.query = request.query.project_expr(alias, Expr::column("tenant_id"));
         request
     }
 
@@ -2489,7 +2635,6 @@ impl<R> SecurityPrivilegeRequest<R> {
         self.group_by_tenant_with(request)
     }
 
-
     pub fn roll_up_to_tenant(self) -> Self {
         self.roll_up_to_tenant_with(crate::Q::tenants().unlimited())
     }
@@ -2510,7 +2655,9 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn unselect_tenant(mut self) -> Self {
         self.query.projection.retain(|field| field != "tenant_id");
-        self.query.relations.retain(|relation| relation.name != "tenant");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "tenant");
         self
     }
     pub fn select_tenant(mut self) -> Self {
@@ -2520,12 +2667,15 @@ impl<R> SecurityPrivilegeRequest<R> {
 
     pub fn select_tenant_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("tenant", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("tenant", selection));
+        self.query = self.query.relation_query("tenant", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_tenant_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_tenant_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_tenant_as_with_options(facet_name, request, true)
     }
 
@@ -2543,6 +2693,139 @@ impl<R> SecurityPrivilegeRequest<R> {
         ));
         self
     }
+    pub fn have_security_role_privileges(self) -> Self {
+        self.with_security_role_privilege_list_matching(crate::Q::security_role_privileges_minimal())
+    }
+
+    pub fn have_no_security_role_privileges(self) -> Self {
+        self.without_security_role_privilege_list_matching(
+            crate::Q::security_role_privileges_minimal(),
+        )
+    }
+
+    pub fn with_security_role_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::SecurityRolePrivilege as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "security_privilege_id",
+        ));
+        self.relation_filters.push(RelationFilter::new(
+            "security_role_privilege_list",
+            selection,
+        ));
+        self
+    }
+
+    pub fn without_security_role_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::SecurityRolePrivilege as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "security_privilege_id",
+        ));
+        self.relation_filters.push(RelationFilter::new(
+            "security_role_privilege_list",
+            selection,
+        ));
+        self
+    }
+
+    pub fn select_security_role_privilege_list(mut self) -> Self {
+        self.query = self.query.relation("security_role_privilege_list");
+        self
+    }
+
+    pub fn select_security_role_privilege_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("security_role_privilege_list", selection.into_query());
+        self
+    }
+    pub fn count_security_role_privileges(self) -> Self {
+        self.count_security_role_privileges_as("count_security_role_privileges")
+    }
+
+    pub fn count_security_role_privileges_as(self, alias: impl Into<String>) -> Self {
+        self.count_security_role_privileges_with(
+            alias,
+            crate::Q::security_role_privileges().unlimited(),
+        )
+    }
+
+    pub fn count_security_role_privileges_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_security_role_privileges(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_security_role_privileges_as("refinements", request)
+    }
+
+    pub fn stats_from_security_role_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_security_role_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_security_role_privileges_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_security_role_privileges(request)
+    }
 }
 
 impl<R> Default for SecurityPrivilegeRequest<R> {
@@ -2551,13 +2834,13 @@ impl<R> Default for SecurityPrivilegeRequest<R> {
     }
 }
 
-impl<R> From< SecurityPrivilegeRequest<R> > for SelectQuery {
+impl<R> From<SecurityPrivilegeRequest<R>> for SelectQuery {
     fn from(request: SecurityPrivilegeRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< SecurityPrivilegeRequest<R> > for QuerySelection {
+impl<R> From<SecurityPrivilegeRequest<R>> for QuerySelection {
     fn from(request: SecurityPrivilegeRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -2569,14 +2852,20 @@ impl<R> From< SecurityPrivilegeRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::SecurityPrivilege> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C>
+    for teaql_core::Audited<crate::SecurityPrivilege>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::SecurityPrivilege;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -2589,98 +2878,172 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<SecurityPrivilegeRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::SecurityPrivilege
+    pub fn new_entity<C>(&self, context: &C) -> crate::SecurityPrivilege
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::SecurityPrivilege::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::SecurityPrivilege::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity =
+            crate::SecurityPrivilege::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::SecurityPrivilege::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> SecurityPrivilegeRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        bool,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        u64,
+        crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::SecurityPrivilegeRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

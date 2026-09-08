@@ -5,7 +5,10 @@ pub struct RepositoryConfigurationExpression<'a> {
 }
 
 impl<'a> RepositoryConfigurationExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a crate::RepositoryConfiguration>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<&'a crate::RepositoryConfiguration>,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -13,9 +16,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -24,7 +28,8 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a crate::RepositoryConfiguration {
-        self.resolve().expect("Relation was legitimately null in database!")
+        self.resolve()
+            .expect("Relation was legitimately null in database!")
     }
 
     pub fn get_id(self) -> crate::ValueExpression<'a, u64> {
@@ -38,76 +43,107 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     }
 
     pub fn get_recipe_name(self) -> crate::ValueExpression<'a, String> {
-        let next = self.result.and_then("recipe_name", |entity| entity.eval_recipe_name());
+        let next = self
+            .result
+            .and_then("recipe_name", |entity| entity.eval_recipe_name());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_online(self) -> crate::ValueExpression<'a, bool> {
-        let next = self.result.and_then("online", |entity| entity.eval_online());
+        let next = self
+            .result
+            .and_then("online", |entity| entity.eval_online());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_remote_url(self) -> crate::ValueExpression<'a, String> {
-        let next = self.result.and_then("remote_url", |entity| entity.eval_remote_url());
+        let next = self
+            .result
+            .and_then("remote_url", |entity| entity.eval_remote_url());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_version(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("version", |entity| entity.eval_version());
+        let next = self
+            .result
+            .and_then("version", |entity| entity.eval_version());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_tenant_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("tenant_id", |entity| entity.eval_tenant_id());
+        let next = self
+            .result
+            .and_then("tenant_id", |entity| entity.eval_tenant_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_repository_type_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("repository_type_id", |entity| entity.eval_repository_type_id());
+        let next = self.result.and_then("repository_type_id", |entity| {
+            entity.eval_repository_type_id()
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_repository_format_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("repository_format_id", |entity| entity.eval_repository_format_id());
+        let next = self.result.and_then("repository_format_id", |entity| {
+            entity.eval_repository_format_id()
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_write_policy_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("write_policy_id", |entity| entity.eval_write_policy_id());
+        let next = self
+            .result
+            .and_then("write_policy_id", |entity| entity.eval_write_policy_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_blob_store_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("blob_store_id", |entity| entity.eval_blob_store_id());
+        let next = self
+            .result
+            .and_then("blob_store_id", |entity| entity.eval_blob_store_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_tenant(self) -> crate::TenantExpression<'a> {
-        let next = self.result.and_then("tenant", |entity| entity.eval_tenant());
+        let next = self
+            .result
+            .and_then("tenant", |entity| entity.eval_tenant());
         crate::TenantExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_repository_type(self) -> crate::RepositoryTypeExpression<'a> {
-        let next = self.result.and_then("repository_type", |entity| entity.eval_repository_type());
+        let next = self
+            .result
+            .and_then("repository_type", |entity| entity.eval_repository_type());
         crate::RepositoryTypeExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_repository_format(self) -> crate::RepositoryFormatExpression<'a> {
-        let next = self.result.and_then("repository_format", |entity| entity.eval_repository_format());
+        let next = self.result.and_then("repository_format", |entity| {
+            entity.eval_repository_format()
+        });
         crate::RepositoryFormatExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_write_policy(self) -> crate::WritePolicyExpression<'a> {
-        let next = self.result.and_then("write_policy", |entity| entity.eval_write_policy());
+        let next = self
+            .result
+            .and_then("write_policy", |entity| entity.eval_write_policy());
         crate::WritePolicyExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_blob_store(self) -> crate::BlobStoreConfigurationExpression<'a> {
-        let next = self.result.and_then("blob_store", |entity| entity.eval_blob_store());
+        let next = self
+            .result
+            .and_then("blob_store", |entity| entity.eval_blob_store());
         crate::BlobStoreConfigurationExpression::new(next, self.root_desc.clone())
     }
     pub fn repository_type_is_hosted(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_type_id", |entity| {
             if !entity.is_loaded("repository_type_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_type_id".to_string(), attempted_path: "repository_type_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_type_id".to_string(),
+                    attempted_path: "repository_type_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_type_is_hosted())
             }
@@ -118,7 +154,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_type_is_proxy(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_type_id", |entity| {
             if !entity.is_loaded("repository_type_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_type_id".to_string(), attempted_path: "repository_type_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_type_id".to_string(),
+                    attempted_path: "repository_type_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_type_is_proxy())
             }
@@ -129,7 +168,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_type_is_group(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_type_id", |entity| {
             if !entity.is_loaded("repository_type_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_type_id".to_string(), attempted_path: "repository_type_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_type_id".to_string(),
+                    attempted_path: "repository_type_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_type_is_group())
             }
@@ -140,7 +182,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_maven2(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_maven2())
             }
@@ -151,7 +196,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_raw(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_raw())
             }
@@ -162,7 +210,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_docker(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_docker())
             }
@@ -173,7 +224,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_npm(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_npm())
             }
@@ -184,7 +238,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_pypi(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_pypi())
             }
@@ -195,7 +252,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_gomod(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_gomod())
             }
@@ -206,7 +266,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_cargo(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_cargo())
             }
@@ -217,7 +280,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn repository_format_is_nuget(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("repository_format_id", |entity| {
             if !entity.is_loaded("repository_format_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "repository_format_id".to_string(), attempted_path: "repository_format_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.repository_format_is_nuget())
             }
@@ -228,7 +294,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn write_policy_is_allow_write(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("write_policy_id", |entity| {
             if !entity.is_loaded("write_policy_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "write_policy_id".to_string(), attempted_path: "write_policy_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "write_policy_id".to_string(),
+                    attempted_path: "write_policy_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.write_policy_is_allow_write())
             }
@@ -239,7 +308,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn write_policy_is_allow_once(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("write_policy_id", |entity| {
             if !entity.is_loaded("write_policy_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "write_policy_id".to_string(), attempted_path: "write_policy_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "write_policy_id".to_string(),
+                    attempted_path: "write_policy_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.write_policy_is_allow_once())
             }
@@ -250,7 +322,10 @@ impl<'a> RepositoryConfigurationExpression<'a> {
     pub fn write_policy_is_read_only(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("write_policy_id", |entity| {
             if !entity.is_loaded("write_policy_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "write_policy_id".to_string(), attempted_path: "write_policy_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "write_policy_id".to_string(),
+                    attempted_path: "write_policy_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.write_policy_is_read_only())
             }
@@ -266,7 +341,12 @@ pub struct RepositoryConfigurationListExpression<'a> {
 }
 
 impl<'a> RepositoryConfigurationListExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a teaql_core::SmartList<crate::RepositoryConfiguration>>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<
+            &'a teaql_core::SmartList<crate::RepositoryConfiguration>,
+        >,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -274,9 +354,10 @@ impl<'a> RepositoryConfigurationListExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -285,11 +366,14 @@ impl<'a> RepositoryConfigurationListExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a teaql_core::SmartList<crate::RepositoryConfiguration> {
-        self.resolve().expect("List relation was legitimately null in database!")
+        self.resolve()
+            .expect("List relation was legitimately null in database!")
     }
 
     pub fn size(&self) -> crate::ValueExpression<'a, usize> {
-        let next = self.result.clone().and_then("size", |list| teaql_core::eval::EvalResult::Value(list.len()));
+        let next = self.result.clone().and_then("size", |list| {
+            teaql_core::eval::EvalResult::Value(list.len())
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 

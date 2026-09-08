@@ -20,7 +20,8 @@ impl PyPiEngine {
         filename: &str,
         data: &[u8],
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "pypi").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "pypi").await?;
         let blob_info = blobstore.create_blob(data).await?;
 
         let ct = if filename.ends_with(".whl") {
@@ -47,7 +48,11 @@ impl PyPiEngine {
             "",
             project_name,
             version,
-            if filename.ends_with(".whl") { "whl" } else { "tar.gz" },
+            if filename.ends_with(".whl") {
+                "whl"
+            } else {
+                "tar.gz"
+            },
         )
         .await?;
 
@@ -74,7 +79,8 @@ impl PyPiEngine {
             None => return Ok(generate_pypi_simple_root_html(&[])),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 1000, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 1000, 0).await?;
         let mut names: Vec<String> = comps.into_iter().map(|c| c.name().to_string()).collect();
         names.sort();
         names.dedup();
@@ -92,14 +98,19 @@ impl PyPiEngine {
             None => return Ok(None),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
-        let matching: Vec<_> = comps.into_iter().filter(|c| c.name().eq_ignore_ascii_case(project_name)).collect();
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let matching: Vec<_> = comps
+            .into_iter()
+            .filter(|c| c.name().eq_ignore_ascii_case(project_name))
+            .collect();
 
         if matching.is_empty() {
             return Ok(None);
         }
 
-        let assets = AssetService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let assets =
+            AssetService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let mut files = Vec::new();
 
         for a in assets {
@@ -116,7 +127,10 @@ impl PyPiEngine {
             }
         }
 
-        Ok(Some(generate_pypi_simple_package_html(project_name, &files)))
+        Ok(Some(generate_pypi_simple_package_html(
+            project_name,
+            &files,
+        )))
     }
 
     pub async fn get_package_file(

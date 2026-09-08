@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PersonalAccessToken } from '../types';
 import { fetchTokens, createToken, revokeToken } from '../api';
-import { Key, Plus, Trash2, Copy, Check, Terminal, Shield } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, Terminal, Shield, AlertCircle } from 'lucide-react';
 
 export const AccessTokensView: React.FC = () => {
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
@@ -9,10 +9,16 @@ export const AccessTokensView: React.FC = () => {
   const [days, setDays] = useState(30);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
+  const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const loadTokens = async () => {
-    const list = await fetchTokens();
-    setTokens(list);
+    try {
+      const list = await fetchTokens();
+      setTokens(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tokens');
+    }
   };
 
   useEffect(() => {
@@ -22,18 +28,37 @@ export const AccessTokensView: React.FC = () => {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!description.trim()) return;
-    const res = await createToken(description.trim(), ['read', 'write'], days);
-    if (res) {
-      setCreatedSecret(res.token);
-      setDescription('');
-      loadTokens();
+    setError(null);
+    try {
+      const res = await createToken(
+        description.trim(),
+        ['repository:read', 'repository:write'],
+        days,
+      );
+      if (res) {
+        setCreatedSecret(res.token);
+        setDescription('');
+        loadTokens();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create token');
     }
   };
 
-  const handleRevoke = async (id: string) => {
-    if (confirm('Are you sure you want to revoke this token?')) {
-      await revokeToken(id);
+  const handleRevoke = (id: string) => {
+    setRevokeTargetId(id);
+  };
+
+  const confirmRevoke = async () => {
+    if (!revokeTargetId) return;
+    setError(null);
+    try {
+      await revokeToken(revokeTargetId);
+      setRevokeTargetId(null);
       loadTokens();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke token');
+      setRevokeTargetId(null);
     }
   };
 
@@ -53,6 +78,12 @@ export const AccessTokensView: React.FC = () => {
           <p className="page-desc">Generate Personal Access Tokens to authenticate Maven, npm, Docker, and Cargo CLI tools.</p>
         </div>
       </div>
+
+      {error && (
+        <div className="error-banner">
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
 
       {/* 2-Column Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -177,6 +208,23 @@ export const AccessTokensView: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {revokeTargetId && (
+        <div className="modal-backdrop" onClick={() => setRevokeTargetId(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Revoke Token</h2>
+            <p className="confirm-modal-text">
+              This action cannot be undone. Any CI/CD pipelines using this token will lose access.
+            </p>
+            <div className="confirm-modal-actions">
+              <button className="btn btn-secondary" onClick={() => setRevokeTargetId(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmRevoke}>
+                <Trash2 size={14} /> Revoke Token
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

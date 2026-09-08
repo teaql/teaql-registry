@@ -1,16 +1,16 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
-use crate::format::docker::{
-    compute_sha256_digest, DOCKER_MANIFEST_V2_MEDIA_TYPE,
-};
+use crate::format::docker::{compute_sha256_digest, DOCKER_MANIFEST_V2_MEDIA_TYPE};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
-static UPLOAD_SESSIONS: LazyLock<Arc<Mutex<HashMap<String, Vec<u8>>>>> =
+type UploadSessions = Arc<Mutex<HashMap<String, Vec<u8>>>>;
+
+static UPLOAD_SESSIONS: LazyLock<UploadSessions> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 pub struct DockerEngine;
@@ -18,13 +18,13 @@ pub struct DockerEngine;
 impl DockerEngine {
     pub fn start_upload(_image_name: &str) -> String {
         let upload_uuid = uuid::Uuid::new_v4().to_string();
-        let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
+        let mut sessions = UPLOAD_SESSIONS.lock().expect("lock poisoned");
         sessions.insert(upload_uuid.clone(), Vec::new());
         upload_uuid
     }
 
     pub fn append_chunk(upload_uuid: &str, chunk: &[u8]) -> Result<usize> {
-        let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
+        let mut sessions = UPLOAD_SESSIONS.lock().expect("lock poisoned");
         let buf = sessions
             .get_mut(upload_uuid)
             .ok_or_else(|| anyhow!("Upload session not found: {}", upload_uuid))?;
@@ -42,10 +42,8 @@ impl DockerEngine {
         extra_data: Option<&[u8]>,
     ) -> Result<String> {
         let mut data = {
-            let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
-            sessions
-                .remove(upload_uuid)
-                .unwrap_or_default()
+            let mut sessions = UPLOAD_SESSIONS.lock().expect("lock poisoned");
+            sessions.remove(upload_uuid).unwrap_or_default()
         };
 
         if let Some(extra) = extra_data {
@@ -61,7 +59,8 @@ impl DockerEngine {
             ));
         }
 
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
 
         // Write binary to BlobStore
         let blob_info = blobstore.create_blob(&data).await?;
@@ -145,7 +144,10 @@ impl DockerEngine {
             None => return Ok(None),
         };
 
-        Ok(Some((asset_blob.blob_size(), asset_blob.content_type().to_string())))
+        Ok(Some((
+            asset_blob.blob_size(),
+            asset_blob.content_type().to_string(),
+        )))
     }
 
     pub async fn put_manifest(
@@ -158,7 +160,8 @@ impl DockerEngine {
         content_type: &str,
     ) -> Result<String> {
         let digest = compute_sha256_digest(manifest_data);
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
 
         // Write binary to BlobStore
         let blob_info = blobstore.create_blob(manifest_data).await?;
@@ -275,7 +278,8 @@ impl DockerEngine {
             ("", image_name)
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let tags: Vec<String> = comps
             .into_iter()
             .filter(|c| c.name() == name && (namespace.is_empty() || c.namespace() == namespace))

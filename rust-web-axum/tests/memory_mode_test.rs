@@ -1,17 +1,17 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use std::sync::Arc;
 use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
 use teaql_registry::context::RegistryContextExt;
 use teaql_registry::engine::hosted::HostedEngine;
 use teaql_registry::services::{ComponentService, RepositoryService};
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use teaql_registry_core::service_runtime;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pure_memory_mode_single_latest_version_retention() {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let mut runtime = service_runtime(config).await.expect("Runtime error");
     runtime.ensure_schema().await.expect("Schema error");
 
@@ -67,7 +67,9 @@ async fn test_pure_memory_mode_single_latest_version_retention() {
     .await
     .expect("Put v1 jar failed");
 
-    let comps_v1 = ComponentService::list_by_repository(&runtime, content_repo.id()).await.unwrap();
+    let comps_v1 = ComponentService::list_by_repository(&runtime, content_repo.id())
+        .await
+        .unwrap();
     assert_eq!(comps_v1.len(), 1);
     assert_eq!(comps_v1[0].version_name(), "1.0.0");
 
@@ -97,9 +99,15 @@ async fn test_pure_memory_mode_single_latest_version_retention() {
     .await
     .expect("Put v2 jar failed");
 
-    let comps_v2 = ComponentService::list_by_repository(&runtime, content_repo.id()).await.unwrap();
+    let comps_v2 = ComponentService::list_by_repository(&runtime, content_repo.id())
+        .await
+        .unwrap();
     // Strictly ONLY 1 version (the latest 2.0.0) must be present in memory mode!
-    assert_eq!(comps_v2.len(), 1, "Only single latest version must be retained in memory mode");
+    assert_eq!(
+        comps_v2.len(),
+        1,
+        "Only single latest version must be retained in memory mode"
+    );
     assert_eq!(comps_v2[0].version_name(), "2.0.0");
 
     // 4. Publish version 3.0.0 (version 2.0.0 must be evicted)
@@ -116,7 +124,9 @@ async fn test_pure_memory_mode_single_latest_version_retention() {
     .await
     .expect("Put v3 jar failed");
 
-    let comps_v3 = ComponentService::list_by_repository(&runtime, content_repo.id()).await.unwrap();
+    let comps_v3 = ComponentService::list_by_repository(&runtime, content_repo.id())
+        .await
+        .unwrap();
     assert_eq!(comps_v3.len(), 1);
     assert_eq!(comps_v3[0].version_name(), "3.0.0");
 }

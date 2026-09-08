@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use teaql_registry::webhook::{WebhookEventPayload, WebhookService};
 
 #[tokio::test]

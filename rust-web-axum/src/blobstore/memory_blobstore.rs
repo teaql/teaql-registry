@@ -48,7 +48,7 @@ impl BlobStore for MemoryBlobStore {
         let md5 = hex::encode(md5_h.finalize());
 
         {
-            let mut lock = self.storage.write().unwrap();
+            let mut lock = self.storage.write().expect("lock poisoned");
             lock.insert(blob_id.clone(), data.to_vec());
         }
 
@@ -62,7 +62,7 @@ impl BlobStore for MemoryBlobStore {
 
     async fn read_blob(&self, blob_ref: &str) -> Result<Bytes> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
-        let lock = self.storage.read().unwrap();
+        let lock = self.storage.read().expect("lock poisoned");
         if let Some(bytes) = lock.get(blob_id) {
             Ok(Bytes::copy_from_slice(bytes))
         } else {
@@ -72,14 +72,14 @@ impl BlobStore for MemoryBlobStore {
 
     async fn delete_blob(&self, blob_ref: &str) -> Result<()> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
-        let mut lock = self.storage.write().unwrap();
+        let mut lock = self.storage.write().expect("lock poisoned");
         lock.remove(blob_id);
         Ok(())
     }
 
     async fn exists_blob(&self, blob_ref: &str) -> Result<bool> {
         let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
-        let lock = self.storage.read().unwrap();
+        let lock = self.storage.read().expect("lock poisoned");
         Ok(lock.contains_key(blob_id))
     }
 

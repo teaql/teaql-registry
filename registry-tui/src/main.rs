@@ -1,12 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod api;
@@ -14,22 +15,31 @@ mod app;
 mod types;
 mod ui;
 
-use api::RegistryClient;
-use app::{App, Tab};
+use api::{RegistryApi, RegistryClient};
+use app::{Action, App};
 
 #[derive(Parser, Debug)]
-#[command(name = "registry-tui", version = "0.1.0", about = "Terminal UI Client for TeaQL Registry")]
+#[command(
+    name = "registry-tui",
+    version = "0.1.0",
+    about = "Terminal UI Client for TeaQL Registry"
+)]
 struct Args {
     /// Registry backend HTTP endpoint URL
-    #[arg(short, long, env = "REGISTRY_ENDPOINT", default_value = "http://127.0.0.1:8081")]
+    #[arg(
+        short,
+        long,
+        env = "REGISTRY_ENDPOINT",
+        default_value = "http://127.0.0.1:8081"
+    )]
     endpoint: String,
 
     /// Username for HTTP Basic Authentication
-    #[arg(short, long, env = "REGISTRY_USER", default_value = "admin")]
+    #[arg(short, long, env = "REGISTRY_USER")]
     username: Option<String>,
 
     /// Password for HTTP Basic Authentication
-    #[arg(short, long, env = "REGISTRY_PASSWORD", default_value = "admin123")]
+    #[arg(short, long, env = "REGISTRY_PASSWORD")]
     password: Option<String>,
 
     /// Personal Access Token (PAT) for Bearer authentication
@@ -41,17 +51,81 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let client = RegistryClient::new(
+    // Resolve credentials: token > username/password > interactive prompt
+    let (username, password, token) = resolve_credentials(&args)?;
+
+    let client: Arc<dyn RegistryApi> = Arc::new(RegistryClient::new(
         &args.endpoint,
-        args.username.as_deref(),
-        args.password.as_deref(),
-        args.token.as_deref(),
-    );
+        username.as_deref(),
+        password.as_deref(),
+        token.as_deref(),
+    ));
+
+    // Verify connection before entering TUI
+    eprint!("Connecting to {} ... ", args.endpoint);
+    match client.verify_connection().await {
+        Ok(true) => eprintln!("ok"),
+        Ok(false) => {
+            eprintln!("failed (authentication error)");
+            eprintln!("Check your username/password or token.");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("failed");
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     let mut app = App::new(client);
-    app.refresh_all().await;
+    app.initialize().await;
 
-    // Setup terminal
+    // Run the TUI event loop
+    run_tui(&mut app).await?;
+
+    Ok(())
+}
+
+/// Resolve credentials from args or interactive prompt.
+fn resolve_credentials(args: &Args) -> Result<(Option<String>, Option<String>, Option<String>)> {
+    if args.token.is_some() {
+        return Ok((
+            args.username.clone(),
+            args.password.clone(),
+            args.token.clone(),
+        ));
+    }
+
+    if args.username.is_some() && args.password.is_some() {
+        return Ok((args.username.clone(), args.password.clone(), None));
+    }
+
+    // Interactive login
+    eprintln!("TeaQL Registry TUI — {}", args.endpoint);
+    eprintln!();
+
+    let user = if let Some(u) = &args.username {
+        u.clone()
+    } else {
+        eprint!("Username: ");
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf)?;
+        buf.trim().to_string()
+    };
+
+    let pass = if let Some(p) = &args.password {
+        p.clone()
+    } else {
+        eprint!("Password: ");
+        rpassword::read_password()?
+    };
+
+    Ok((Some(user), Some(pass), None))
+}
+
+/// Terminal setup, event loop, teardown.
+/// All business logic is delegated to `app.handle_key()`.
+async fn run_tui(app: &mut App) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -62,7 +136,7 @@ async fn main() -> Result<()> {
     let mut last_tick = Instant::now();
 
     loop {
-        terminal.draw(|f| ui::render_app(f, &app))?;
+        terminal.draw(|f| ui::render_app(f, app))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -71,105 +145,9 @@ async fn main() -> Result<()> {
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // If in search input mode
-                    if app.is_searching {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Enter => {
-                                app.is_searching = false;
-                                app.refresh_all().await;
-                            }
-                            KeyCode::Backspace => {
-                                app.search_input.pop();
-                            }
-                            KeyCode::Char(c) => {
-                                app.search_input.push(c);
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    // Standard global keys
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            break;
-                        }
-                        KeyCode::Tab => {
-                            app.next_tab();
-                        }
-                        KeyCode::BackTab => {
-                            app.prev_tab();
-                        }
-                        KeyCode::Char('1') => app.set_tab(Tab::Overview),
-                        KeyCode::Char('2') => app.set_tab(Tab::Repositories),
-                        KeyCode::Char('3') => app.set_tab(Tab::Artifacts),
-                        KeyCode::Char('4') => app.set_tab(Tab::QuickOps),
-                        KeyCode::Char('r') => {
-                            app.refresh_all().await;
-                        }
-                        KeyCode::Char('/') => {
-                            app.set_tab(Tab::Artifacts);
-                            app.is_searching = true;
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.move_cursor_up();
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            app.move_cursor_down();
-                        }
-                        KeyCode::Char('g') => {
-                            // Quick Ops: Run GC
-                            app.add_log("Starting BlobStore Garbage Collection...");
-                            match app.client.run_gc().await {
-                                Ok(rep) => {
-                                    app.add_log(&format!(
-                                        "SUCCESS: GC purged {} orphaned blobs, freed {:.2} KB.",
-                                        rep.orphaned_blobs_deleted,
-                                        rep.freed_bytes as f64 / 1024.0
-                                    ));
-                                }
-                                Err(e) => {
-                                    app.add_log(&format!("ERROR: GC failed: {}", e));
-                                }
-                            }
-                            app.refresh_all().await;
-                        }
-                        KeyCode::Char('c') => {
-                            // Quick Ops: Retention Cleanup
-                            let target_repo = app
-                                .selected_repo()
-                                .map(|r| r.name.clone())
-                                .unwrap_or_else(|| "maven-releases".to_string());
-
-                            app.add_log(&format!("Running retention cleanup on {}...", target_repo));
-                            match app.client.run_cleanup(&target_repo, 5).await {
-                                Ok(rep) => {
-                                    app.add_log(&format!(
-                                        "SUCCESS: Cleanup deleted {} old components ({} assets), freed {:.2} KB.",
-                                        rep.deleted_components_count,
-                                        rep.deleted_assets_count,
-                                        rep.freed_bytes as f64 / 1024.0
-                                    ));
-                                }
-                                Err(e) => {
-                                    app.add_log(&format!("ERROR: Cleanup failed: {}", e));
-                                }
-                            }
-                            app.refresh_all().await;
-                        }
-                        KeyCode::Char('t') => {
-                            // Quick Ops: Generate Temp Token
-                            app.add_log("Generating temporary 7-day PAT token...");
-                            match app.client.create_temp_token("tui-temp-cli-token").await {
-                                Ok(token) => {
-                                    app.add_log(&format!("TOKEN: {}", token));
-                                }
-                                Err(e) => {
-                                    app.add_log(&format!("ERROR: Token generation failed: {}", e));
-                                }
-                            }
-                        }
-                        _ => {}
+                    let action = app.handle_key(key.code).await;
+                    if action == Action::Quit {
+                        break;
                     }
                 }
             }

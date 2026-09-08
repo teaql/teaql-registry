@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::api::AppState;
 use crate::engine::DockerEngine;
 use crate::format::docker::{DockerTagList, DOCKER_MANIFEST_V2_MEDIA_TYPE};
-use crate::services::RepositoryService;
+use crate::services::{RepositoryService, ServiceLogService};
 
 #[derive(Debug, Deserialize)]
 pub struct UploadQueryParams {
@@ -30,26 +30,35 @@ pub async fn handle_v2_ping() -> Response {
     (StatusCode::OK, headers, "{}").into_response()
 }
 
-async fn resolve_docker_repo(state: &AppState, repo_name: Option<&str>) -> Result<teaql_registry_core::RepositoryConfiguration, (StatusCode, String)> {
+async fn resolve_docker_repo(
+    runtime: &teaql_registry_core::ServiceRuntime,
+    repo_name: Option<&str>,
+) -> Result<teaql_registry_core::RepositoryConfiguration, (StatusCode, String)> {
     let name = repo_name.unwrap_or("docker-hosted");
-    match RepositoryService::find_by_name(&state.runtime, name).await {
+    match RepositoryService::find_by_name(runtime, name).await {
         Ok(Some(r)) => Ok(r),
-        Ok(None) => Err((StatusCode::NOT_FOUND, format!("Docker repository not found: {}", name))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            format!("Docker repository not found: {}", name),
+        )),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
 // 1. Tags list: GET /v2/<name>/tags/list
 pub async fn handle_tags_list(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path(name): Path<String>,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
         Err((code, msg)) => return (code, msg).into_response(),
     };
 
-    match DockerEngine::list_tags(&state.runtime, &repo, &name).await {
+    match DockerEngine::list_tags(&request.runtime, &repo, &name).await {
         Ok(tags) => {
             let list = DockerTagList { name, tags };
             let mut headers = HeaderMap::new();
@@ -66,11 +75,14 @@ pub async fn handle_tags_list(
 // 2. Blobs Upload Init: POST /v2/<name>/blobs/uploads/
 pub async fn handle_blob_upload_init(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path(name): Path<String>,
     Query(query): Query<UploadQueryParams>,
     body: Bytes,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
         Err((code, msg)) => return (code, msg).into_response(),
     };
@@ -79,7 +91,7 @@ pub async fn handle_blob_upload_init(
     if let Some(digest) = query.digest {
         let upload_uuid = DockerEngine::start_upload(&name);
         match DockerEngine::finish_upload(
-            &state.runtime,
+            &request.runtime,
             &repo,
             &state.blobstore,
             &name,
@@ -97,11 +109,12 @@ pub async fn handle_blob_upload_init(
                 );
                 headers.insert(
                     header::LOCATION,
-                    HeaderValue::from_str(&format!("/v2/{}/blobs/{}", name, digest_res)).unwrap(),
+                    HeaderValue::from_str(&format!("/v2/{}/blobs/{}", name, digest_res))
+                        .expect("valid ASCII header value"),
                 );
                 headers.insert(
                     header::HeaderName::from_static("docker-content-digest"),
-                    HeaderValue::from_str(&digest_res).unwrap(),
+                    HeaderValue::from_str(&digest_res).expect("valid ASCII header value"),
                 );
                 return (StatusCode::CREATED, headers).into_response();
             }
@@ -117,11 +130,12 @@ pub async fn handle_blob_upload_init(
     );
     headers.insert(
         header::LOCATION,
-        HeaderValue::from_str(&format!("/v2/{}/blobs/uploads/{}", name, uuid)).unwrap(),
+        HeaderValue::from_str(&format!("/v2/{}/blobs/uploads/{}", name, uuid))
+            .expect("valid ASCII header value"),
     );
     headers.insert(
         header::HeaderName::from_static("docker-upload-uuid"),
-        HeaderValue::from_str(&uuid).unwrap(),
+        HeaderValue::from_str(&uuid).expect("valid ASCII header value"),
     );
     headers.insert(
         header::HeaderName::from_static("range"),
@@ -146,15 +160,17 @@ pub async fn handle_blob_upload_chunk(
             );
             headers.insert(
                 header::LOCATION,
-                HeaderValue::from_str(&format!("/v2/{}/blobs/uploads/{}", name, uuid)).unwrap(),
+                HeaderValue::from_str(&format!("/v2/{}/blobs/uploads/{}", name, uuid))
+                    .expect("valid ASCII header value"),
             );
             headers.insert(
                 header::HeaderName::from_static("docker-upload-uuid"),
-                HeaderValue::from_str(&uuid).unwrap(),
+                HeaderValue::from_str(&uuid).expect("valid ASCII header value"),
             );
             headers.insert(
                 header::HeaderName::from_static("range"),
-                HeaderValue::from_str(&format!("0-{}", len.saturating_sub(1))).unwrap(),
+                HeaderValue::from_str(&format!("0-{}", len.saturating_sub(1)))
+                    .expect("valid ASCII header value"),
             );
             (StatusCode::ACCEPTED, headers).into_response()
         }
@@ -165,20 +181,57 @@ pub async fn handle_blob_upload_chunk(
 // 4. Blobs Upload Finish: PUT /v2/<name>/blobs/uploads/<uuid>?digest=sha256:...
 pub async fn handle_blob_upload_finish(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((name, uuid)): Path<(String, String)>,
     Query(query): Query<UploadQueryParams>,
+    _headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let username = request.username.clone();
+    let client_ip = request.client_ip.clone();
+    let body_size = body.len() as i64;
+    let upload_path = format!("/v2/{}/blobs/uploads/{}", name, uuid);
+
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
-        Err((code, msg)) => return (code, msg).into_response(),
+        Err((code, msg)) => {
+            let log_type = if code == StatusCode::INTERNAL_SERVER_ERROR {
+                "system"
+            } else {
+                "service"
+            };
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                log_type,
+                0,
+                &username,
+                &client_ip,
+                "upload",
+                &name,
+                &upload_path,
+                "docker",
+                body_size,
+                "error",
+                &msg,
+            )
+            .await;
+            return (code, msg).into_response();
+        }
     };
+    let repo_name = repo.name();
 
     let digest = query.digest.unwrap_or_default();
-    let extra = if body.is_empty() { None } else { Some(body.as_ref()) };
+    let extra = if body.is_empty() {
+        None
+    } else {
+        Some(body.as_ref())
+    };
 
     match DockerEngine::finish_upload(
-        &state.runtime,
+        &request.runtime,
         &repo,
         &state.blobstore,
         &name,
@@ -189,71 +242,196 @@ pub async fn handle_blob_upload_finish(
     .await
     {
         Ok(digest_res) => {
-            let mut headers = HeaderMap::new();
-            headers.insert(
+            let artifact_path = format!("/v2/{}/blobs/{}", name, digest_res);
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "upload",
+                &repo_name,
+                &artifact_path,
+                "docker",
+                body_size,
+                "success",
+                "",
+            )
+            .await;
+            let mut res_headers = HeaderMap::new();
+            res_headers.insert(
                 header::HeaderName::from_static("docker-distribution-api-version"),
                 HeaderValue::from_static("registry/2.0"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::LOCATION,
-                HeaderValue::from_str(&format!("/v2/{}/blobs/{}", name, digest_res)).unwrap(),
+                HeaderValue::from_str(&format!("/v2/{}/blobs/{}", name, digest_res))
+                    .expect("valid ASCII header value"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest_res).unwrap(),
+                HeaderValue::from_str(&digest_res).expect("valid ASCII header value"),
             );
-            (StatusCode::CREATED, headers).into_response()
+            (StatusCode::CREATED, res_headers).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "upload",
+                &repo_name,
+                &upload_path,
+                "docker",
+                body_size,
+                "error",
+                &e.to_string(),
+            )
+            .await;
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+        }
     }
 }
 
 // 5. Blob HEAD / GET: /v2/<name>/blobs/<digest>
 pub async fn handle_blob_get(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+    _headers: HeaderMap,
     Path((name, digest)): Path<(String, String)>,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
-        Ok(r) => r,
-        Err((code, msg)) => return (code, msg).into_response(),
-    };
+    let username = request.username.clone();
+    let client_ip = request.client_ip.clone();
+    let path = format!("/v2/{}/blobs/{}", name, digest);
 
-    match DockerEngine::get_blob(&state.runtime, &repo, &state.blobstore, &name, &digest).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
+        Ok(r) => r,
+        Err((code, msg)) => {
+            let log_type = if code == StatusCode::INTERNAL_SERVER_ERROR {
+                "system"
+            } else {
+                "service"
+            };
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                log_type,
+                0,
+                &username,
+                &client_ip,
+                "download",
+                &name,
+                &path,
+                "docker",
+                0,
+                "error",
+                &msg,
+            )
+            .await;
+            return (code, msg).into_response();
+        }
+    };
+    let repo_name = repo.name();
+
+    match DockerEngine::get_blob(&request.runtime, &repo, &state.blobstore, &name, &digest).await {
         Ok(Some((data, content_type))) => {
-            let mut headers = HeaderMap::new();
-            headers.insert(
+            let size = data.len() as i64;
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                size,
+                "success",
+                "",
+            )
+            .await;
+            let mut res_headers = HeaderMap::new();
+            res_headers.insert(
                 header::HeaderName::from_static("docker-distribution-api-version"),
                 HeaderValue::from_static("registry/2.0"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest).unwrap(),
+                HeaderValue::from_str(&digest).expect("valid ASCII header value"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_str(&content_type).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                HeaderValue::from_str(&content_type)
+                    .unwrap_or(HeaderValue::from_static("application/octet-stream")),
             );
-            headers.insert(
+            res_headers.insert(
                 header::CONTENT_LENGTH,
-                HeaderValue::from_str(&data.len().to_string()).unwrap(),
+                HeaderValue::from_str(&data.len().to_string()).expect("valid ASCII header value"),
             );
-            (StatusCode::OK, headers, data).into_response()
+            (StatusCode::OK, res_headers, data).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "Blob not found").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(None) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                0,
+                "error",
+                "Blob not found",
+            )
+            .await;
+            (StatusCode::NOT_FOUND, "Blob not found").into_response()
+        }
+        Err(e) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "system",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                0,
+                "error",
+                &e.to_string(),
+            )
+            .await;
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
     }
 }
 
 pub async fn handle_blob_head(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((name, digest)): Path<(String, String)>,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
         Err((code, msg)) => return (code, msg).into_response(),
     };
 
-    match DockerEngine::has_blob(&state.runtime, &repo, &name, &digest).await {
+    match DockerEngine::has_blob(&request.runtime, &repo, &name, &digest).await {
         Ok(Some((size, content_type))) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -262,15 +440,16 @@ pub async fn handle_blob_head(
             );
             headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest).unwrap(),
+                HeaderValue::from_str(&digest).expect("valid ASCII header value"),
             );
             headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_str(&content_type).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                HeaderValue::from_str(&content_type)
+                    .unwrap_or(HeaderValue::from_static("application/octet-stream")),
             );
             headers.insert(
                 header::CONTENT_LENGTH,
-                HeaderValue::from_str(&size.to_string()).unwrap(),
+                HeaderValue::from_str(&size.to_string()).expect("valid ASCII header value"),
             );
             (StatusCode::OK, headers).into_response()
         }
@@ -282,14 +461,46 @@ pub async fn handle_blob_head(
 // 6. Manifest PUT: PUT /v2/<name>/manifests/<reference>
 pub async fn handle_manifest_put(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((name, reference)): Path<(String, String)>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let username = request.username.clone();
+    let client_ip = request.client_ip.clone();
+    let body_size = body.len() as i64;
+    let path = format!("/v2/{}/manifests/{}", name, reference);
+
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
-        Err((code, msg)) => return (code, msg).into_response(),
+        Err((code, msg)) => {
+            let log_type = if code == StatusCode::INTERNAL_SERVER_ERROR {
+                "system"
+            } else {
+                "service"
+            };
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                log_type,
+                0,
+                &username,
+                &client_ip,
+                "upload",
+                &name,
+                &path,
+                "docker",
+                body_size,
+                "error",
+                &msg,
+            )
+            .await;
+            return (code, msg).into_response();
+        }
     };
+    let repo_name = repo.name();
 
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -297,7 +508,7 @@ pub async fn handle_manifest_put(
         .unwrap_or(DOCKER_MANIFEST_V2_MEDIA_TYPE);
 
     match DockerEngine::put_manifest(
-        &state.runtime,
+        &request.runtime,
         &repo,
         &state.blobstore,
         &name,
@@ -308,6 +519,22 @@ pub async fn handle_manifest_put(
     .await
     {
         Ok(digest) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "upload",
+                &repo_name,
+                &path,
+                "docker",
+                body_size,
+                "success",
+                "",
+            )
+            .await;
             let mut res_headers = HeaderMap::new();
             res_headers.insert(
                 header::HeaderName::from_static("docker-distribution-api-version"),
@@ -315,64 +542,176 @@ pub async fn handle_manifest_put(
             );
             res_headers.insert(
                 header::LOCATION,
-                HeaderValue::from_str(&format!("/v2/{}/manifests/{}", name, reference)).unwrap(),
+                HeaderValue::from_str(&format!("/v2/{}/manifests/{}", name, reference))
+                    .expect("valid ASCII header value"),
             );
             res_headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest).unwrap(),
+                HeaderValue::from_str(&digest).expect("valid ASCII header value"),
             );
             (StatusCode::CREATED, res_headers).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "upload",
+                &repo_name,
+                &path,
+                "docker",
+                body_size,
+                "error",
+                &e.to_string(),
+            )
+            .await;
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+        }
     }
 }
 
 // 7. Manifest GET / HEAD: /v2/<name>/manifests/<reference>
 pub async fn handle_manifest_get(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+    _headers: HeaderMap,
     Path((name, reference)): Path<(String, String)>,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
-        Ok(r) => r,
-        Err((code, msg)) => return (code, msg).into_response(),
-    };
+    let username = request.username.clone();
+    let client_ip = request.client_ip.clone();
+    let path = format!("/v2/{}/manifests/{}", name, reference);
 
-    match DockerEngine::get_manifest(&state.runtime, &repo, &state.blobstore, &name, &reference).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
+        Ok(r) => r,
+        Err((code, msg)) => {
+            let log_type = if code == StatusCode::INTERNAL_SERVER_ERROR {
+                "system"
+            } else {
+                "service"
+            };
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                log_type,
+                0,
+                &username,
+                &client_ip,
+                "download",
+                &name,
+                &path,
+                "docker",
+                0,
+                "error",
+                &msg,
+            )
+            .await;
+            return (code, msg).into_response();
+        }
+    };
+    let repo_name = repo.name();
+
+    match DockerEngine::get_manifest(&request.runtime, &repo, &state.blobstore, &name, &reference)
+        .await
+    {
         Ok(Some((data, content_type, digest))) => {
-            let mut headers = HeaderMap::new();
-            headers.insert(
+            let size = data.len() as i64;
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                size,
+                "success",
+                "",
+            )
+            .await;
+            let mut res_headers = HeaderMap::new();
+            res_headers.insert(
                 header::HeaderName::from_static("docker-distribution-api-version"),
                 HeaderValue::from_static("registry/2.0"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest).unwrap(),
+                HeaderValue::from_str(&digest).expect("valid ASCII header value"),
             );
-            headers.insert(
+            res_headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_str(&content_type).unwrap_or(HeaderValue::from_static(DOCKER_MANIFEST_V2_MEDIA_TYPE)),
+                HeaderValue::from_str(&content_type)
+                    .unwrap_or(HeaderValue::from_static(DOCKER_MANIFEST_V2_MEDIA_TYPE)),
             );
-            headers.insert(
+            res_headers.insert(
                 header::CONTENT_LENGTH,
-                HeaderValue::from_str(&data.len().to_string()).unwrap(),
+                HeaderValue::from_str(&data.len().to_string()).expect("valid ASCII header value"),
             );
-            (StatusCode::OK, headers, data).into_response()
+            (StatusCode::OK, res_headers, data).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "Manifest not found").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(None) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                0,
+                "error",
+                "Manifest not found",
+            )
+            .await;
+            (StatusCode::NOT_FOUND, "Manifest not found").into_response()
+        }
+        Err(e) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                1_u64,
+                "system",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "download",
+                &repo_name,
+                &path,
+                "docker",
+                0,
+                "error",
+                &e.to_string(),
+            )
+            .await;
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
     }
 }
 
 pub async fn handle_manifest_head(
     State(state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Path((name, reference)): Path<(String, String)>,
 ) -> Response {
-    let repo = match resolve_docker_repo(&state, None).await {
+    let repo = match resolve_docker_repo(&request.runtime, None).await {
         Ok(r) => r,
         Err((code, msg)) => return (code, msg).into_response(),
     };
 
-    match DockerEngine::get_manifest(&state.runtime, &repo, &state.blobstore, &name, &reference).await {
+    match DockerEngine::get_manifest(&request.runtime, &repo, &state.blobstore, &name, &reference)
+        .await
+    {
         Ok(Some((data, content_type, digest))) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -381,15 +720,16 @@ pub async fn handle_manifest_head(
             );
             headers.insert(
                 header::HeaderName::from_static("docker-content-digest"),
-                HeaderValue::from_str(&digest).unwrap(),
+                HeaderValue::from_str(&digest).expect("valid ASCII header value"),
             );
             headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_str(&content_type).unwrap_or(HeaderValue::from_static(DOCKER_MANIFEST_V2_MEDIA_TYPE)),
+                HeaderValue::from_str(&content_type)
+                    .unwrap_or(HeaderValue::from_static(DOCKER_MANIFEST_V2_MEDIA_TYPE)),
             );
             headers.insert(
                 header::CONTENT_LENGTH,
-                HeaderValue::from_str(&data.len().to_string()).unwrap(),
+                HeaderValue::from_str(&data.len().to_string()).expect("valid ASCII header value"),
             );
             (StatusCode::OK, headers).into_response()
         }

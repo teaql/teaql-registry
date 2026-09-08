@@ -49,18 +49,18 @@ impl WebhookService {
             enabled: true,
         };
 
-        let mut store = WEBHOOK_STORE.write().unwrap();
+        let mut store = WEBHOOK_STORE.write().expect("lock poisoned");
         store.insert(sub.id.clone(), sub.clone());
         sub
     }
 
     pub fn list() -> Vec<WebhookSubscription> {
-        let store = WEBHOOK_STORE.read().unwrap();
+        let store = WEBHOOK_STORE.read().expect("lock poisoned");
         store.values().cloned().collect()
     }
 
     pub fn unregister(id: &str) -> bool {
-        let mut store = WEBHOOK_STORE.write().unwrap();
+        let mut store = WEBHOOK_STORE.write().expect("lock poisoned");
         store.remove(id).is_some()
     }
 
@@ -85,7 +85,11 @@ impl WebhookService {
                 continue;
             }
 
-            if !sub.events.iter().any(|e| e == "*" || e == &event.event_type) {
+            if !sub
+                .events
+                .iter()
+                .any(|e| e == "*" || e == &event.event_type)
+            {
                 continue;
             }
 
@@ -97,7 +101,8 @@ impl WebhookService {
                 .header("X-TeaQL-Delivery", &event.event_id);
 
             if let Some(ref secret) = sub.secret {
-                let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take any size");
+                let mut mac =
+                    HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take any size");
                 mac.update(json_body.as_bytes());
                 let signature = hex::encode(mac.finalize().into_bytes());
                 req = req.header("X-TeaQL-Signature", format!("sha256={}", signature));
@@ -107,7 +112,11 @@ impl WebhookService {
             tokio::spawn(async move {
                 match req_with_body.send().await {
                     Ok(resp) => {
-                        info!("Webhook delivered to {} -> Status {}", sub.target_url, resp.status());
+                        info!(
+                            "Webhook delivered to {} -> Status {}",
+                            sub.target_url,
+                            resp.status()
+                        );
                     }
                     Err(e) => {
                         error!("Failed to deliver webhook to {}: {}", sub.target_url, e);

@@ -70,3 +70,23 @@ export interface GcReport {
   orphaned_blobs_deleted: number;
   freed_bytes: number;
 }
+
+export interface ServiceLogItem {
+  id: number;
+  tenant_id: number;
+  event_time: string;
+  log_type: string;
+  username: string;
+  client_ip: string;
+  action: string;
+  repository_name: string;
+  artifact_path: string;
+  format_name: string;
+  content_size: number;
+  status: string;
+  error_message: string;
+}
+
+export interface ApiError {
+  message: string;
+}

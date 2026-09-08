@@ -129,6 +129,7 @@
         _name="Content Repository"
         _module="Repository Domain"
         _module_key="repository"
+        tenant="tenant()"
         repository_id="1l"
         format_name="maven2" />
 
@@ -199,5 +200,41 @@
         privilege_type="wildcard"
         permission_pattern="*.*.*"
         read_only="true" />
+
+    <security_user_role
+        _name="Security User Role Assignment"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        security_user="security_user()"
+        security_role="security_role()" />
+
+    <security_role_privilege
+        _name="Security Role Privilege Assignment"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        security_role="security_role()"
+        security_privilege="security_privilege()" />
+
+
+    <service_log
+        _name="Service Log"
+        _module="Audit Domain"
+        _module_key="audit"
+        _log="true"
+        tenant="tenant()"
+        event_time="createTime()"
+        log_type="service"
+        operator_id="0l"
+        operator_name="system"
+        client_ip="127.0.0.1"
+        action="upload"
+        repository_name="maven-releases"
+        artifact_path="/com/example/lib/1.0/lib-1.0.jar"
+        format_name="maven2"
+        content_size="0l"
+        status="success"
+        error_message="none" />
 
 </root>

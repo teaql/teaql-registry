@@ -33,7 +33,9 @@ pub fn create_nuget_service_index(base_url: &str) -> NuGetServiceIndex {
             NuGetResource {
                 id: format!("{}/v3/flatcontainer/", base_url.trim_end_matches('/')),
                 resource_type: "PackageBaseAddress/3.0.0".to_string(),
-                comment: Some("Base URL of Azure storage where NuGet packages are stored".to_string()),
+                comment: Some(
+                    "Base URL of Azure storage where NuGet packages are stored".to_string(),
+                ),
             },
             NuGetResource {
                 id: format!("{}/v3/query", base_url.trim_end_matches('/')),

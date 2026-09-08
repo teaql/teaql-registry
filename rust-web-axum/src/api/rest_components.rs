@@ -42,22 +42,34 @@ pub struct PageXO<T> {
 }
 
 pub async fn list_components(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Query(params): Query<RepoQueryParams>,
 ) -> Response {
-    let repo = match RepositoryService::find_by_name(&state.runtime, &params.repository).await {
+    let repo = match RepositoryService::find_by_name(&request.runtime, &params.repository).await {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::NOT_FOUND, "Repository not found").into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    let content_repo = match RepositoryService::get_content_repository(&state.runtime, repo.id()).await {
-        Ok(Some(cr)) => cr,
-        Ok(None) => return Json(PageXO::<ComponentXO> { items: vec![], continuation_token: None }).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
+    let content_repo =
+        match RepositoryService::get_content_repository(&request.runtime, repo.id()).await {
+            Ok(Some(cr)) => cr,
+            Ok(None) => {
+                return Json(PageXO::<ComponentXO> {
+                    items: vec![],
+                    continuation_token: None,
+                })
+                .into_response()
+            }
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        };
 
-    match ComponentService::list_by_content_repository(&state.runtime, content_repo.id(), 50, 0).await {
+    match ComponentService::list_by_content_repository(&request.runtime, content_repo.id(), 50, 0)
+        .await
+    {
         Ok(comps) => {
             let items: Vec<ComponentXO> = comps
                 .into_iter()
@@ -70,29 +82,44 @@ pub async fn list_components(
                     version: c.version_name().to_string(),
                 })
                 .collect();
-            Json(PageXO { items, continuation_token: None }).into_response()
+            Json(PageXO {
+                items,
+                continuation_token: None,
+            })
+            .into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 pub async fn list_assets(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Query(params): Query<RepoQueryParams>,
 ) -> Response {
-    let repo = match RepositoryService::find_by_name(&state.runtime, &params.repository).await {
+    let repo = match RepositoryService::find_by_name(&request.runtime, &params.repository).await {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::NOT_FOUND, "Repository not found").into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    let content_repo = match RepositoryService::get_content_repository(&state.runtime, repo.id()).await {
-        Ok(Some(cr)) => cr,
-        Ok(None) => return Json(PageXO::<AssetXO> { items: vec![], continuation_token: None }).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
+    let content_repo =
+        match RepositoryService::get_content_repository(&request.runtime, repo.id()).await {
+            Ok(Some(cr)) => cr,
+            Ok(None) => {
+                return Json(PageXO::<AssetXO> {
+                    items: vec![],
+                    continuation_token: None,
+                })
+                .into_response()
+            }
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        };
 
-    match AssetService::list_by_content_repository(&state.runtime, content_repo.id(), 50, 0).await {
+    match AssetService::list_by_content_repository(&request.runtime, content_repo.id(), 50, 0).await
+    {
         Ok(assets) => {
             let items: Vec<AssetXO> = assets
                 .into_iter()
@@ -104,7 +131,11 @@ pub async fn list_assets(
                     download_url: format!("/repository/{}{}", params.repository, a.path()),
                 })
                 .collect();
-            Json(PageXO { items, continuation_token: None }).into_response()
+            Json(PageXO {
+                items,
+                continuation_token: None,
+            })
+            .into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

@@ -33,8 +33,13 @@ pub struct CreateFileBlobStoreRequest {
     pub path: Option<String>,
 }
 
-pub async fn list_blobstores(State(state): State<AppState>) -> Response {
-    match BlobStoreService::list(&state.runtime).await {
+pub async fn list_blobstores(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match BlobStoreService::list(&request.runtime).await {
         Ok(stores) => {
             let items: Vec<BlobStoreItemXO> = stores
                 .into_iter()
@@ -53,25 +58,35 @@ pub async fn list_blobstores(State(state): State<AppState>) -> Response {
 }
 
 pub async fn create_s3_blobstore(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Json(payload): Json<CreateS3BlobStoreRequest>,
 ) -> Response {
     let bucket = payload.bucket.unwrap_or_else(|| "teaql-blobs".to_string());
-    let path = format!("s3://{}/{}", bucket, payload.prefix.unwrap_or(payload.name.clone()));
-    match BlobStoreService::create(&state.runtime, &payload.name, &path, true).await {
+    let path = format!(
+        "s3://{}/{}",
+        bucket,
+        payload.prefix.unwrap_or(payload.name.clone())
+    );
+    match BlobStoreService::create(&request.runtime, &payload.name, &path, true).await {
         Ok(_) => StatusCode::CREATED.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
 }
 
 pub async fn create_file_blobstore(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Json(payload): Json<CreateFileBlobStoreRequest>,
 ) -> Response {
     let path = payload
         .path
         .unwrap_or_else(|| format!("s3://teaql-blobs/{}", payload.name));
-    match BlobStoreService::create(&state.runtime, &payload.name, &path, true).await {
+    match BlobStoreService::create(&request.runtime, &payload.name, &path, true).await {
         Ok(_) => StatusCode::CREATED.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }

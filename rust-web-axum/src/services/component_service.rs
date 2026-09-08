@@ -1,10 +1,8 @@
-use anyhow::{anyhow, Result};
-use teaql_registry_core::{
-    Component, Q, ServiceRuntime,
-};
-use teaql_core::{Entity, SmartList};
 use crate::context::RegistryContextExt;
 use crate::services::{AssetService, SaveAuditedExt};
+use anyhow::{anyhow, Result};
+use teaql_core::{Entity, SmartList};
+use teaql_registry_core::{Component, ServiceRuntime, Q};
 
 pub struct ComponentService;
 
@@ -14,14 +12,17 @@ impl ComponentService {
             .select_self_fields()
             .with_id_is(component_id)
             .limit(1)
-            .comment("what: Get component by id")
-            .purpose("why: Get component by id")
+            .comment("what: query registry component metadata")
+            .purpose("why: resolve package components and their assets")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to get component by id: {}", e))?;
 
         if let Some(comp) = rows.into_iter().next() {
-            if comp.name().is_empty() || comp.name().starts_with("[DELETED") || comp.kind() == "deleted" {
+            if comp.name().is_empty()
+                || comp.name().starts_with("[DELETED")
+                || comp.kind() == "deleted"
+            {
                 Ok(None)
             } else {
                 Ok(Some(comp))
@@ -41,15 +42,17 @@ impl ComponentService {
             .select_self_fields()
             .filter_by_content_repository(content_repo_id)
             .offset(offset, limit)
-            .comment("what: Load components for content repository")
-            .purpose("why: REST components query API")
+            .comment("what: query registry component metadata")
+            .purpose("why: resolve package components and their assets")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list components: {}", e))?;
 
         let filtered: Vec<Component> = rows
             .into_iter()
-            .filter(|c| !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted")
+            .filter(|c| {
+                !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted"
+            })
             .collect();
         Ok(SmartList::new(filtered))
     }
@@ -75,10 +78,15 @@ impl ComponentService {
         let mut evicted_count = 0;
 
         for old_comp in all_comps {
-            if old_comp.namespace() == namespace && old_comp.name() == name && old_comp.version_name() != current_version {
+            if old_comp.namespace() == namespace
+                && old_comp.name() == name
+                && old_comp.version_name() != current_version
+            {
                 let assets = AssetService::list_by_component(ctx, old_comp.id()).await?;
                 for asset in assets {
-                    if let Ok(Some(blob)) = AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await {
+                    if let Ok(Some(blob)) =
+                        AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await
+                    {
                         let _ = blobstore.delete_blob(&blob.blob_ref()).await;
                         let _ = AssetService::delete_asset_blob(ctx, blob.id()).await;
                     }
@@ -102,7 +110,8 @@ impl ComponentService {
         kind: &str,
     ) -> Result<Component> {
         if ctx.is_memory_mode() {
-            let _ = Self::evict_older_versions(ctx, content_repo_id, namespace, name, version_name).await;
+            let _ = Self::evict_older_versions(ctx, content_repo_id, namespace, name, version_name)
+                .await;
         }
 
         let rows = Q::components()
@@ -112,20 +121,28 @@ impl ComponentService {
             .with_name_is(name)
             .with_version_name_is(version_name)
             .limit(1)
-            .comment("what: Check existing component")
-            .purpose("why: Avoid duplicate component creations")
+            .comment("what: query registry component metadata")
+            .purpose("why: resolve package components and their assets")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to check existing component: {}", e))?;
 
-        if let Some(comp) = rows
-            .into_iter()
-            .find(|c| !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted")
-        {
+        if let Some(comp) = rows.into_iter().find(|c| {
+            !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted"
+        }) {
             return Ok(comp);
         }
 
-        Self::create(ctx, content_repo_id, namespace, name, version_name, version_name, kind).await
+        Self::create(
+            ctx,
+            content_repo_id,
+            namespace,
+            name,
+            version_name,
+            version_name,
+            kind,
+        )
+        .await
     }
 
     pub async fn create(
@@ -138,10 +155,9 @@ impl ComponentService {
         kind: &str,
     ) -> Result<Component> {
         let mut comp = Q::components()
-            .purpose("why: Create new component record")
+            .comment("what: create registry component metadata")
+            .purpose("why: persist a package component in its repository")
             .new_entity(ctx);
-        comp.attach_root_recursive(teaql_runtime::EntityRoot::default());
-
         comp.update_content_repository_id(content_repo_id);
         comp.update_namespace(namespace);
         comp.update_name(name);
@@ -149,7 +165,7 @@ impl ComponentService {
         comp.update_normalized_version(normalized_version);
         comp.update_kind(kind);
 
-        comp.clone()
+        let comp = comp
             .audit_as("Creating component record")
             .save_with(ctx)
             .await
@@ -163,14 +179,13 @@ impl ComponentService {
             .select_self_fields()
             .with_id_is(component_id)
             .limit(1)
-            .comment("what: Find component to delete")
-            .purpose("why: Delete component")
+            .comment("what: query registry component metadata")
+            .purpose("why: resolve package components and their assets")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find component for delete: {}", e))?;
 
         if let Some(mut comp) = rows.into_iter().next() {
-            comp.attach_root_recursive(teaql_runtime::EntityRoot::default());
             comp.update_kind("deleted");
             comp.update_name(format!("[DELETED_{}]", comp.id()));
             let _ = comp.audit_as("Deleting component").save_with(ctx).await?;

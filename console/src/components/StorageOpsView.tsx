@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BlobStoreItem, Repository, GcReport, CleanupReport } from '../types';
 import { fetchBlobStores, runGarbageCollection, runRetentionCleanup } from '../api';
-import { Database, Trash2, RefreshCw, HardDrive, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { Database, Trash2, RefreshCw, HardDrive, CheckCircle2, ShieldAlert, AlertCircle } from 'lucide-react';
 
 interface Props {
   repositories: Repository[];
@@ -11,6 +11,7 @@ export const StorageOpsView: React.FC<Props> = ({ repositories }) => {
   const [blobStores, setBlobStores] = useState<BlobStoreItem[]>([]);
   const [gcRunning, setGcRunning] = useState(false);
   const [gcReport, setGcReport] = useState<GcReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [selectedRepo, setSelectedRepo] = useState(repositories[0]?.name || '');
   const [maxVersions, setMaxVersions] = useState(5);
@@ -18,18 +19,27 @@ export const StorageOpsView: React.FC<Props> = ({ repositories }) => {
   const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
 
   useEffect(() => {
-    fetchBlobStores().then(setBlobStores);
+    fetchBlobStores()
+      .then(setBlobStores)
+      .catch(e => setError(e instanceof Error ? e.message : 'Failed to fetch blobstores'));
+
     if (!selectedRepo && repositories.length > 0) {
       setSelectedRepo(repositories[0].name);
     }
-  }, [repositories]);
+  }, [repositories, selectedRepo]);
 
   const handleGc = async () => {
     setGcRunning(true);
     setGcReport(null);
-    const rep = await runGarbageCollection();
-    setGcReport(rep);
-    setGcRunning(false);
+    setError(null);
+    try {
+      const rep = await runGarbageCollection();
+      setGcReport(rep);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run garbage collection');
+    } finally {
+      setGcRunning(false);
+    }
   };
 
   const handleCleanup = async (e: React.FormEvent) => {
@@ -37,9 +47,15 @@ export const StorageOpsView: React.FC<Props> = ({ repositories }) => {
     if (!selectedRepo) return;
     setCleanupRunning(true);
     setCleanupReport(null);
-    const rep = await runRetentionCleanup(selectedRepo, maxVersions);
-    setCleanupReport(rep);
-    setCleanupRunning(false);
+    setError(null);
+    try {
+      const rep = await runRetentionCleanup(selectedRepo, maxVersions);
+      setCleanupReport(rep);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run retention cleanup');
+    } finally {
+      setCleanupRunning(false);
+    }
   };
 
   return (
@@ -51,37 +67,43 @@ export const StorageOpsView: React.FC<Props> = ({ repositories }) => {
         </div>
       </div>
 
+      {error && (
+        <div className="error-banner">
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
       {/* BlobStore Cards Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-        <div className="repo-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-            <Database size={22} color="#29B5E8" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>Primary Object Storage</div>
-              <div style={{ fontSize: '0.8rem', color: '#64748B' }}>S3 / RustFS / MinIO Cluster</div>
+        {blobStores.length === 0 ? (
+          <div style={{ color: '#64748B', padding: '2rem', textAlign: 'center', background: '#F8FAFC', borderRadius: 'var(--radius-lg)' }}>
+            Loading storage information...
+          </div>
+        ) : (
+          blobStores.map((store) => (
+            <div className="repo-card" key={store.name}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+                {store.type === 's3' ? <Database size={22} color="#29B5E8" /> : <HardDrive size={22} color="#10B981" />}
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{store.name}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#64748B' }}>
+                    {store.type === 's3' ? 'S3-Compatible Object Storage' : 'Local File System Storage'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.7' }}>
+                <div>• Storage Type: <strong>{store.type.toUpperCase()}</strong></div>
+                {store.type === 's3' && store.bucket && (
+                  <div>• Target Bucket: <strong>{store.bucket}</strong></div>
+                )}
+                {store.type === 'file' && store.path && (
+                  <div>• Path: <strong>{store.path}</strong></div>
+                )}
+                <div>• Status: <strong>Online</strong></div>
+              </div>
             </div>
-          </div>
-          <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.7' }}>
-            <div>• Storage Provider: <strong>S3-Compatible (RustFS)</strong></div>
-            <div>• Target Bucket: <strong>teaql-blobs</strong></div>
-            <div>• Deduplication: <strong>SHA-256 Content Addressed</strong></div>
-          </div>
-        </div>
-
-        <div className="repo-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-            <HardDrive size={22} color="#10B981" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>Metadata Ledger Store</div>
-              <div style={{ fontSize: '0.8rem', color: '#64748B' }}>TeaQL PostgreSQL Engine</div>
-            </div>
-          </div>
-          <div style={{ fontSize: '0.875rem', color: '#475569', lineHeight: '1.7' }}>
-            <div>• Database: <strong>PostgreSQL 16</strong></div>
-            <div>• Multi-Tenancy: <strong>Row-Level Tenant Isolation</strong></div>
-            <div>• Audit Trail: <strong>Zero-Code Audited Transactions</strong></div>
-          </div>
-        </div>
+          ))
+        )}
       </div>
 
       {/* Operations 2-Column Grid */}
