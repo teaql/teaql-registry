@@ -25,7 +25,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Check generated domain library
-        run: cargo check -p teaql-registry-core --all-targets
+        run: cargo check -p teaql-registry-service-core --all-targets
       - name: Check application formatting
         run: cargo fmt -p teaql-registry -p registry-tui -- --check
       - name: Lint application-owned code

@@ -208,12 +208,21 @@ MEMORY_MODE=true cargo run --release -p teaql-registry
 ### 6. Run the Test Suite
 
 ```bash
-# Server-side tests (requires PostgreSQL)
-cargo test -p teaql-registry -- --test-threads=1
+# Complete controlled verification (requires PostgreSQL)
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL="postgresql://localhost:5432/nexus_db"
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER="postgres"
+export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD="postgres"
+./scripts/verify.sh
 
-# TUI client tests (no dependencies, uses mock API)
+# Individual TUI tests (no dependencies, uses a mock API)
 cargo test -p registry-tui
 ```
+
+The verification script is the local equivalent of CI: it checks formatting,
+the generated domain library, strict application-owned Clippy lints, the full
+workspace test suite, and patch whitespace. It intentionally requires an
+explicit database configuration so a successful run is retained evidence of
+the environment that was actually tested.
 
 ---
 
