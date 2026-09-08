@@ -147,6 +147,15 @@ impl<'a> TenantExpression<'a> {
         crate::SecurityRolePrivilegeListExpression::new(next, self.root_desc.clone())
     }
 
+    pub fn get_personal_access_token_list(self) -> crate::PersonalAccessTokenListExpression<'a> {
+        let next = self
+            .result
+            .and_then("personal_access_token_list", |entity| {
+                entity.eval_personal_access_token_list()
+            });
+        crate::PersonalAccessTokenListExpression::new(next, self.root_desc.clone())
+    }
+
     pub fn get_service_log_list(self) -> crate::ServiceLogListExpression<'a> {
         let next = self
             .result

@@ -347,6 +347,13 @@ pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     fn security_role_privilege_repository(
         &self,
     ) -> Result<Self::SecurityRolePrivilegeRepository<'_>, ContextError>;
+    type PersonalAccessTokenRepository<'a>: TeaqlEntityRepository + 'a
+    where
+        Self: 'a;
+
+    fn personal_access_token_repository(
+        &self,
+    ) -> Result<Self::PersonalAccessTokenRepository<'_>, ContextError>;
     type ServiceLogRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
@@ -602,6 +609,17 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         &self,
     ) -> Result<Self::SecurityRolePrivilegeRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityRolePrivilege")
+    }
+
+    type PersonalAccessTokenRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    where
+        Self: 'a;
+
+    fn personal_access_token_repository(
+        &self,
+    ) -> Result<Self::PersonalAccessTokenRepository<'_>, ContextError> {
+        self.entity_data_service::<crate::runtime::DataServiceExecutor>("PersonalAccessToken")
     }
 
     type ServiceLogRepository<'a>

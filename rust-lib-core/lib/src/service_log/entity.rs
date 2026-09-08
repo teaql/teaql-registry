@@ -20,47 +20,47 @@ pub struct ServiceLog {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:238
+    // @source model.xml:255
     event_time: teaql_core::time::Timestamp,
 
-    // @source model.xml:238
+    // @source model.xml:255
     log_type: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     operator_id: i64,
 
-    // @source model.xml:238
+    // @source model.xml:255
     operator_name: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     client_ip: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     action: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     repository_name: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     artifact_path: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     format_name: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     content_size: i64,
 
-    // @source model.xml:238
+    // @source model.xml:255
     status: String,
 
-    // @source model.xml:238
+    // @source model.xml:255
     error_message: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:238
+    // @source model.xml:255
     #[teaql(column = "tenant")]
     tenant_id: u64,
-    // @source model.xml:238
+    // @source model.xml:255
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
     #[teaql(dynamic)]

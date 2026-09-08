@@ -111,6 +111,9 @@ impl teaql_data_service::SchemaProvider for LocalSchemaProvider {
             "SecurityRolePrivilege" => Some(std::sync::Arc::new(
                 crate::SecurityRolePrivilege::entity_descriptor(),
             )),
+            "PersonalAccessToken" => Some(std::sync::Arc::new(
+                crate::PersonalAccessToken::entity_descriptor(),
+            )),
             "ServiceLog" => Some(std::sync::Arc::new(crate::ServiceLog::entity_descriptor())),
             _ => None,
         }
@@ -232,6 +235,7 @@ pub async fn service_runtime_from_pool(
         "security_privilege_data",
         "security_user_role_data",
         "security_role_privilege_data",
+        "personal_access_token_data",
         "service_log_data",
     ]);
     context.insert_resource(env_config.config.clone());
@@ -277,6 +281,7 @@ pub fn repository_registry() -> teaql_runtime::InMemoryEntityRegistry {
         .with_entity("SecurityPrivilege")
         .with_entity("SecurityUserRole")
         .with_entity("SecurityRolePrivilege")
+        .with_entity("PersonalAccessToken")
         .with_entity("ServiceLog")
 }
 
@@ -308,6 +313,10 @@ pub fn behavior_registry() -> teaql_runtime::InMemoryEntityDataServiceBehaviorRe
         .with_behavior(
             "SecurityRolePrivilege",
             SecurityRolePrivilegeBehavior::default(),
+        )
+        .with_behavior(
+            "PersonalAccessToken",
+            PersonalAccessTokenBehavior::default(),
         )
         .with_behavior("ServiceLog", ServiceLogBehavior::default())
 }
@@ -379,6 +388,11 @@ pub fn checker_registry() -> teaql_runtime::InMemoryCheckerRegistry {
         .with_checker(
             teaql_runtime::TypedEntityChecker::<SecurityRolePrivilege, _>::new(
                 SecurityRolePrivilegeChecker::default(),
+            ),
+        )
+        .with_checker(
+            teaql_runtime::TypedEntityChecker::<PersonalAccessToken, _>::new(
+                PersonalAccessTokenChecker::default(),
             ),
         )
         .with_checker(teaql_runtime::TypedEntityChecker::<ServiceLog, _>::new(
@@ -1612,6 +1626,30 @@ pub fn generated_wire_field_mappings(
             ]),
         ),
         (
+            "PersonalAccessToken".to_owned(),
+            std::collections::BTreeMap::from([
+                ("id".to_owned(), "id".to_owned()),
+                ("tenant".to_owned(), "tenant".to_owned()),
+                ("security_user".to_owned(), "securityUser".to_owned()),
+                ("username".to_owned(), "username".to_owned()),
+                ("token_id".to_owned(), "tokenId".to_owned()),
+                ("token_hash".to_owned(), "tokenHash".to_owned()),
+                ("description".to_owned(), "description".to_owned()),
+                ("scopes".to_owned(), "scopes".to_owned()),
+                ("created_at".to_owned(), "createdAt".to_owned()),
+                (
+                    "expires_at_epoch_millis".to_owned(),
+                    "expiresAtEpochMillis".to_owned(),
+                ),
+                ("revoked".to_owned(), "revoked".to_owned()),
+                (
+                    "revoked_at_epoch_millis".to_owned(),
+                    "revokedAtEpochMillis".to_owned(),
+                ),
+                ("version".to_owned(), "version".to_owned()),
+            ]),
+        ),
+        (
             "ServiceLog".to_owned(),
             std::collections::BTreeMap::from([
                 ("id".to_owned(), "id".to_owned()),
@@ -1660,6 +1698,7 @@ pub fn module() -> teaql_runtime::RuntimeModule {
         .entity::<SecurityPrivilege>()
         .entity::<SecurityUserRole>()
         .entity::<SecurityRolePrivilege>()
+        .entity::<PersonalAccessToken>()
         .entity::<ServiceLog>()
         .generated_schema_bootstrap(ensure_generated_bootstrap)
 }
@@ -1751,6 +1790,12 @@ pub fn module_with_checkers() -> teaql_runtime::RuntimeModule {
             SecurityRolePrivilegeChecker::default(),
         ),
     );
+    module = module.entity::<PersonalAccessToken>();
+    module = module.checker(
+        teaql_runtime::TypedEntityChecker::<PersonalAccessToken, _>::new(
+            PersonalAccessTokenChecker::default(),
+        ),
+    );
     module = module.entity::<ServiceLog>();
     module = module.checker(teaql_runtime::TypedEntityChecker::<ServiceLog, _>::new(
         ServiceLogChecker::default(),
@@ -1788,6 +1833,8 @@ pub fn module_with_behaviors() -> teaql_runtime::RuntimeModule {
         module.entity_with_behavior::<SecurityUserRole, _>(SecurityUserRoleBehavior::default());
     module = module
         .entity_with_behavior::<SecurityRolePrivilege, _>(SecurityRolePrivilegeBehavior::default());
+    module = module
+        .entity_with_behavior::<PersonalAccessToken, _>(PersonalAccessTokenBehavior::default());
     module = module.entity_with_behavior::<ServiceLog, _>(ServiceLogBehavior::default());
     module = module.generated_schema_bootstrap(ensure_generated_bootstrap);
     module
@@ -1887,6 +1934,13 @@ pub fn module_with_behaviors_and_checkers() -> teaql_runtime::RuntimeModule {
     module = module.checker(
         teaql_runtime::TypedEntityChecker::<SecurityRolePrivilege, _>::new(
             SecurityRolePrivilegeChecker::default(),
+        ),
+    );
+    module = module
+        .entity_with_behavior::<PersonalAccessToken, _>(PersonalAccessTokenBehavior::default());
+    module = module.checker(
+        teaql_runtime::TypedEntityChecker::<PersonalAccessToken, _>::new(
+            PersonalAccessTokenChecker::default(),
         ),
     );
     module = module.entity_with_behavior::<ServiceLog, _>(ServiceLogBehavior::default());

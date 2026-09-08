@@ -132,6 +132,16 @@ impl E {
         )
     }
 
+    pub fn personal_access_token<'a>(
+        value: &'a crate::PersonalAccessToken,
+    ) -> crate::PersonalAccessTokenExpression<'a> {
+        let root_desc = std::sync::Arc::new(format!("PersonalAccessToken(id={})", value.id()));
+        crate::PersonalAccessTokenExpression::new(
+            teaql_core::eval::EvalResult::Value(value),
+            root_desc,
+        )
+    }
+
     pub fn service_log<'a>(value: &'a crate::ServiceLog) -> crate::ServiceLogExpression<'a> {
         let root_desc = std::sync::Arc::new(format!("ServiceLog(id={})", value.id()));
         crate::ServiceLogExpression::new(teaql_core::eval::EvalResult::Value(value), root_desc)

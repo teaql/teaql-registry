@@ -327,6 +327,23 @@ impl Q {
             .enhance_children_if_needed()
     }
 
+    pub fn personal_access_tokens() -> PersonalAccessTokenRequest {
+        PersonalAccessTokenRequest::new()
+            .select_self()
+            .and_filter(Expr::gt("version", 0_i64))
+    }
+
+    pub fn personal_access_tokens_minimal() -> PersonalAccessTokenRequest {
+        PersonalAccessTokenRequest::new().and_filter(Expr::gt("version", 0_i64))
+    }
+
+    pub fn personal_access_tokens_with_children() -> PersonalAccessTokenRequest {
+        PersonalAccessTokenRequest::new()
+            .unlimited()
+            .select_self_fields()
+            .enhance_children_if_needed()
+    }
+
     pub fn service_logs() -> ServiceLogRequest {
         ServiceLogRequest::new()
             .select_self()

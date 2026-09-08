@@ -302,6 +302,20 @@ where
     context
         .user_context()
         .transaction_data(|| async {
+            Box::pin(generate_personal_access_tokens(context, &mut state))
+                .await
+                .map_err(|e| {
+                    teaql_runtime::DataServiceError::Runtime(teaql_runtime::RuntimeError::Graph(
+                        e.to_string(),
+                    ))
+                })
+        })
+        .await
+        .map_err(SampleDataError::from_display)?;
+
+    context
+        .user_context()
+        .transaction_data(|| async {
             Box::pin(generate_repository_configurations(context, &mut state))
                 .await
                 .map_err(|e| {
@@ -1211,6 +1225,114 @@ where
     }
 
     log::info!("Successfully generated sample records for Component.");
+    Ok(())
+}
+
+async fn generate_personal_access_tokens<C>(
+    context: &C,
+    state: &mut SampleDataState,
+) -> Result<(), SampleDataError>
+where
+    C: TeaqlRuntime + ?Sized + crate::TeaqlRepositoryProvider,
+{
+    if state.ids("Tenant").is_empty() {
+        state.record_skipped(
+            crate::PersonalAccessToken::ENTITY_NAME,
+            "Required dependency Tenant is missing in reference pool".to_string(),
+        );
+        log::info!("Skipped generating Personal Access Token: Required dependency Tenant is missing in reference pool.");
+        return Ok(());
+    }
+
+    if state.ids("Security User").is_empty() {
+        state.record_skipped(
+            crate::PersonalAccessToken::ENTITY_NAME,
+            "Required dependency Security User is missing in reference pool".to_string(),
+        );
+        log::info!("Skipped generating Personal Access Token: Required dependency Security User is missing in reference pool.");
+        return Ok(());
+    }
+
+    let object_fields_count = 0 + 1 + 1;
+    let base_fanout = std::cmp::max(1, object_fields_count) * 20;
+
+    let fanout = match state.plan.scale {
+        SampleDataScale::Tiny => base_fanout,
+        SampleDataScale::Small => base_fanout * 5,
+        SampleDataScale::Medium => base_fanout * 50,
+    };
+
+    log::info!(
+        "Generating sample data for Personal Access Token (expected: {})...",
+        fanout
+    );
+
+    for i in 0..fanout {
+        let mut entity = Q::personal_access_tokens()
+            .comment("what: initialize a sample entity")
+            .purpose("why: populate the requested sample dataset")
+            .new_entity(context);
+        let mut used_refs = std::collections::HashSet::new();
+
+        if let Some(ref_id) = state.pick_unused_id("Tenant", i as usize, &used_refs) {
+            entity.update_tenant_id(ref_id);
+            used_refs.insert(ref_id);
+        } else {
+            // Optional relation was missing in reference pool
+        }
+        if let Some(ref_id) = state.pick_unused_id("Security User", i as usize, &used_refs) {
+            entity.update_security_user_id(ref_id);
+            used_refs.insert(ref_id);
+        } else {
+            // Optional relation was missing in reference pool
+        }
+        entity.update_username(format!("{} {}", "automation-user", i + 1));
+
+        entity.update_token_id(format!("{} {}", "token-identifier", i + 1));
+
+        entity.update_token_hash(format!("{} {}", "sha256-token-hash", i + 1));
+
+        entity.update_description(format!("{} {}", "automation token", i + 1));
+
+        entity.update_scopes(format!("{} {}", "read", i + 1));
+
+        {
+            let days = ((i as u64 + state.plan.seed) % (365 * 3)) as i64;
+            let past = chrono::Utc::now().naive_utc()
+                - chrono::Duration::try_days(days).unwrap_or_default();
+            entity.update_created_at(teaql_core::time::Timestamp(
+                past.and_utc().timestamp_millis(),
+            ));
+        }
+
+        {
+            let max_val: u64 = "0l".parse().unwrap_or(1000);
+            let rand_val = (i as u64 + state.plan.seed) % max_val.max(1) + 1;
+            entity.update_expires_at_epoch_millis(rand_val as i64);
+        }
+
+        entity.update_revoked(false);
+
+        {
+            let max_val: u64 = "0l".parse().unwrap_or(1000);
+            let rand_val = (i as u64 + state.plan.seed) % max_val.max(1) + 1;
+            entity.update_revoked_at_epoch_millis(rand_val as i64);
+        }
+
+        entity
+            .audit_as("Init Sample Data")
+            .save(context)
+            .await
+            .map_err(SampleDataError::from_display)?;
+
+        state.record_generated(crate::PersonalAccessToken::ENTITY_NAME);
+
+        if i % 20 == 0 {
+            log::info!("Generating Personal Access Token: {}/{}", i, fanout);
+        }
+    }
+
+    log::info!("Successfully generated sample records for Personal Access Token.");
     Ok(())
 }
 

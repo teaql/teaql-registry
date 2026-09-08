@@ -125,21 +125,33 @@ async fn build_request_context(
             (tenant.0, tenant.1, Some((username, password)))
         } else if let Some(raw_token) = value.strip_prefix("Bearer ").map(str::trim) {
             let principal = TokenService::validate_token(
+                &state.runtime,
                 raw_token,
                 required_privilege(method, path).unwrap_or(""),
             )
+            .await
+            .map_err(internal_error)?
             .ok_or_else(unauthorized)?;
             let tenant = resolve_tenant(&state.runtime, &principal.tenant_id.to_string()).await?;
             let runtime = state
                 .request_runtime(tenant.0, &tenant.1)
                 .await
                 .map_err(internal_error)?;
+            let owner = SecurityService::find_user_by_tenant_and_username(
+                &runtime,
+                principal.tenant_id,
+                &principal.username,
+            )
+            .await
+            .map_err(internal_error)?
+            .filter(|user| user.id() == principal.user_id && user.user_status_id() == 1001)
+            .ok_or_else(unauthorized)?;
             let scope = RequestContext {
                 runtime,
                 tenant_id: principal.tenant_id,
                 tenant_name: tenant.1,
-                user_id: principal.user_id,
-                username: principal.username,
+                user_id: owner.id(),
+                username: owner.username(),
                 client_ip,
                 privileges: principal.scopes.into_iter().collect(),
                 is_anonymous: false,
@@ -174,7 +186,9 @@ async fn build_request_context(
             // Several native package clients send access tokens as the Basic
             // password. Bind that token to the selected tenant and username.
             let required = required_privilege(method, path).unwrap_or("");
-            let principal = TokenService::validate_token(&password, required)
+            let principal = TokenService::validate_token(&runtime, &password, required)
+                .await
+                .map_err(internal_error)?
                 .filter(|principal| {
                     principal.tenant_id == tenant_id
                         && principal.user_id == user.id()

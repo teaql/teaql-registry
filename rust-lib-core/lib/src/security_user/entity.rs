@@ -18,6 +18,13 @@ use teaql_macros::{teaql_entity, TeaqlEntity};
     foreign_key = "security_user_id",
     many
 ))]
+#[teaql(reverse_relation(
+    name = "personal_access_token_list",
+    target = "PersonalAccessToken",
+    local_key = "id",
+    foreign_key = "security_user_id",
+    many
+))]
 #[teaql(
     entity = "SecurityUser",
     table = "security_user_data",
@@ -481,6 +488,37 @@ impl SecurityUser {
             teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded {
                 failed_node: "security_user_role_list".to_string(),
                 attempted_path: "security_user_role_list".to_string(),
+            },
+        }
+    }
+
+    /// Returns the relation view installed by the query that loaded this entity.
+    /// This method never performs an implicit database query.
+    pub fn personal_access_token_list(
+        &self,
+    ) -> teaql_runtime::RelationHandle<'_, teaql_core::SmartList<crate::PersonalAccessToken>> {
+        self.__teaql_runtime_state().relation_list(
+            <Self as teaql_core::TeaqlEntity>::ENTITY_NAME,
+            self.id(),
+            "personal_access_token_list",
+        )
+    }
+
+    pub fn eval_personal_access_token_list(
+        &self,
+    ) -> teaql_core::eval::EvalResult<&teaql_core::SmartList<crate::PersonalAccessToken>> {
+        let relation = self.personal_access_token_list();
+        match relation.state() {
+            teaql_runtime::LoadedRelation::Loaded | teaql_runtime::LoadedRelation::Empty => {
+                teaql_core::eval::EvalResult::Value(
+                    relation
+                        .value()
+                        .expect("loaded list relation must have a value"),
+                )
+            }
+            teaql_runtime::LoadedRelation::NotLoaded => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "personal_access_token_list".to_string(),
+                attempted_path: "personal_access_token_list".to_string(),
             },
         }
     }

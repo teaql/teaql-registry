@@ -399,6 +399,19 @@ fn generate_random_password(len: usize) -> String {
         .collect()
 }
 
+async fn ensure_application_indexes(pool: &deadpool_postgres::Pool) -> anyhow::Result<()> {
+    let client = pool.get().await?;
+    client
+        .batch_execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_personal_access_token_token_id \
+             ON personal_access_token_data(token_id); \
+             CREATE UNIQUE INDEX IF NOT EXISTS ux_personal_access_token_token_hash \
+             ON personal_access_token_data(token_hash);",
+        )
+        .await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -422,6 +435,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_pool = deadpool_postgres::Pool::builder(pool_manager).build()?;
     let runtime = service_runtime_from_pool(runtime_pool.clone()).await?;
     runtime.ensure_schema().await?;
+    ensure_application_indexes(&runtime_pool).await?;
     info!("TeaQL PostgreSQL schema verified and synchronized.");
 
     // 2. Initialize Blob Store (Pure In-Memory Mode or Persistent S3/RustFS)

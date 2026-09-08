@@ -544,6 +544,9 @@ impl<R> TenantRequest<R> {
             "security_role_privilege_list" => self.with_security_role_privilege_list_matching(
                 crate::Q::security_role_privileges_minimal().apply_dynamic_json_filter(tail, value),
             ),
+            "personal_access_token_list" => self.with_personal_access_token_list_matching(
+                crate::Q::personal_access_tokens_minimal().apply_dynamic_json_filter(tail, value),
+            ),
             "service_log_list" => self.with_service_log_list_matching(
                 crate::Q::service_logs_minimal().apply_dynamic_json_filter(tail, value),
             ),
@@ -710,6 +713,7 @@ impl<R> TenantRequest<R> {
         request = request.select_security_privilege_list();
         request = request.select_security_user_role_list();
         request = request.select_security_role_privilege_list();
+        request = request.select_personal_access_token_list();
         request = request.select_service_log_list();
         request
     }
@@ -2567,6 +2571,62 @@ impl<R> TenantRequest<R> {
         self
     }
 
+    pub fn have_personal_access_tokens(self) -> Self {
+        self.with_personal_access_token_list_matching(crate::Q::personal_access_tokens_minimal())
+    }
+
+    pub fn have_no_personal_access_tokens(self) -> Self {
+        self.without_personal_access_token_list_matching(crate::Q::personal_access_tokens_minimal())
+    }
+
+    pub fn with_personal_access_token_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::PersonalAccessToken as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("personal_access_token_list", selection));
+        self
+    }
+
+    pub fn without_personal_access_token_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::PersonalAccessToken as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("personal_access_token_list", selection));
+        self
+    }
+
+    pub fn select_personal_access_token_list(mut self) -> Self {
+        self.query = self.query.relation("personal_access_token_list");
+        self
+    }
+
+    pub fn select_personal_access_token_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("personal_access_token_list", selection.into_query());
+        self
+    }
+
     pub fn have_service_logs(self) -> Self {
         self.with_service_log_list_matching(crate::Q::service_logs_minimal())
     }
@@ -3656,6 +3716,442 @@ impl<R> TenantRequest<R> {
         request: impl Into<QuerySelection>,
     ) -> Self {
         self.stats_from_security_role_privileges(request)
+    }
+
+    pub fn count_personal_access_tokens(self) -> Self {
+        self.count_personal_access_tokens_as("count_personal_access_tokens")
+    }
+
+    pub fn count_personal_access_tokens_as(self, alias: impl Into<String>) -> Self {
+        self.count_personal_access_tokens_with(
+            alias,
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn count_personal_access_tokens_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_personal_access_tokens(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_personal_access_tokens_as("refinements", request)
+    }
+
+    pub fn stats_from_personal_access_tokens_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_personal_access_tokens_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_personal_access_tokens_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_personal_access_tokens(request)
+    }
+
+    pub fn min_created_at_of_personal_access_tokens(self) -> Self {
+        self.min_created_at_of_personal_access_tokens_as(
+            "min_created_at_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_created_at_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("created_at", "min_created_at"),
+        )
+    }
+    pub fn max_created_at_of_personal_access_tokens(self) -> Self {
+        self.max_created_at_of_personal_access_tokens_as(
+            "max_created_at_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_created_at_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("created_at", "max_created_at"),
+        )
+    }
+    pub fn sum_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sum_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sum_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sum_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("expires_at_epoch_millis", "sum_expires_at_epoch_millis"),
+        )
+    }
+    pub fn min_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.min_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "min_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("expires_at_epoch_millis", "min_expires_at_epoch_millis"),
+        )
+    }
+    pub fn max_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.max_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "max_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("expires_at_epoch_millis", "max_expires_at_epoch_millis"),
+        )
+    }
+    pub fn avg_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.avg_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "avg_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn avg_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("expires_at_epoch_millis", "avg_expires_at_epoch_millis"),
+        )
+    }
+    pub fn standard_deviation_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "standard_deviation_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("expires_at_epoch_millis", "stdDev_expires_at_epoch_millis"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as("square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens", crate::Q::personal_access_tokens().unlimited())
+    }
+
+    pub fn square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request.into().into_query().stddev_pop(
+                "expires_at_epoch_millis",
+                "stdDevPop_expires_at_epoch_millis",
+            ),
+        )
+    }
+    pub fn sample_variance_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sample_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_variance_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("expires_at_epoch_millis", "varSamp_expires_at_epoch_millis"),
+        )
+    }
+    pub fn sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("expires_at_epoch_millis", "varPop_expires_at_epoch_millis"),
+        )
+    }
+    pub fn sum_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sum_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sum_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sum_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("revoked_at_epoch_millis", "sum_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn min_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.min_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "min_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("revoked_at_epoch_millis", "min_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn max_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.max_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "max_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("revoked_at_epoch_millis", "max_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn avg_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.avg_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "avg_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn avg_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("revoked_at_epoch_millis", "avg_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("revoked_at_epoch_millis", "stdDev_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as("square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens", crate::Q::personal_access_tokens().unlimited())
+    }
+
+    pub fn square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request.into().into_query().stddev_pop(
+                "revoked_at_epoch_millis",
+                "stdDevPop_revoked_at_epoch_millis",
+            ),
+        )
+    }
+    pub fn sample_variance_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sample_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_variance_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("revoked_at_epoch_millis", "varSamp_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("revoked_at_epoch_millis", "varPop_revoked_at_epoch_millis"),
+        )
     }
 
     pub fn count_service_logs(self) -> Self {

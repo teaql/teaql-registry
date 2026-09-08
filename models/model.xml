@@ -217,6 +217,23 @@
         security_role="security_role()"
         security_privilege="security_privilege()" />
 
+    <personal_access_token
+        _name="Personal Access Token"
+        _module="Security Domain"
+        _module_key="security"
+        _audit_mask_fields="token_id,token_hash"
+        tenant="tenant()"
+        security_user="security_user()"
+        username="automation-user"
+        token_id="token-identifier"
+        token_hash="sha256-token-hash"
+        description="automation token"
+        scopes="repository:read"
+        created_at="createTime()"
+        expires_at_epoch_millis="0l"
+        revoked="false"
+        revoked_at_epoch_millis="0l" />
+
 
     <service_log
         _name="Service Log"

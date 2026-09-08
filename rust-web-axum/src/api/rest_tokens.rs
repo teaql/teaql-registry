@@ -26,8 +26,17 @@ pub async fn handle_list_tokens(
     State(_state): State<AppState>,
     Extension(request): Extension<Arc<RequestContext>>,
 ) -> Response {
-    let tokens = TokenService::list_user_tokens(request.tenant_id, request.user_id);
-    Json(tokens).into_response()
+    match TokenService::list_user_tokens(
+        &request.runtime,
+        request.tenant_id,
+        request.user_id,
+        &request.username,
+    )
+    .await
+    {
+        Ok(tokens) => Json(tokens).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
 }
 
 pub async fn handle_create_token(
@@ -64,14 +73,23 @@ pub async fn handle_create_token(
     if req.expires_in_days.is_some_and(|days| days < 0) {
         return (StatusCode::BAD_REQUEST, "expiresInDays cannot be negative").into_response();
     }
-    let (secret, pat) = TokenService::create_token(
+    let result = TokenService::create_token(
+        &request.runtime,
         request.tenant_id,
         request.user_id,
         &request.username,
         &req.description,
         scopes,
         req.expires_in_days,
-    );
+    )
+    .await;
+
+    let (secret, pat) = match result {
+        Ok(value) => value,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
+    };
 
     (
         StatusCode::CREATED,
@@ -85,9 +103,16 @@ pub async fn handle_revoke_token(
     Extension(request): Extension<Arc<RequestContext>>,
     Path(token_id): Path<String>,
 ) -> Response {
-    if TokenService::revoke_token(request.tenant_id, request.user_id, &token_id) {
-        StatusCode::NO_CONTENT.into_response()
-    } else {
-        (StatusCode::NOT_FOUND, "Token not found").into_response()
+    match TokenService::revoke_token(
+        &request.runtime,
+        request.tenant_id,
+        request.user_id,
+        &token_id,
+    )
+    .await
+    {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "Token not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
 }

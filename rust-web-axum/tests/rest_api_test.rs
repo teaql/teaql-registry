@@ -168,12 +168,13 @@ async fn test_rest_security_endpoints() {
 
     // 2. Create user
     let uname = format!("user-{}", uuid::Uuid::new_v4().simple());
+    let password = format!("Tq9!{}#Registry", uuid::Uuid::new_v4().simple());
     let user_body = json!({
         "userId": uname,
         "firstName": "John",
         "lastName": "Doe",
         "emailAddress": "john.doe@example.com",
-        "password": "Password123!",
+        "password": password,
         "status": "active",
         "roles": ["nx-admin"]
     });
@@ -220,7 +221,7 @@ async fn test_rest_security_endpoints() {
         ))
         .unwrap();
     let anon_put_resp = app.oneshot(anon_put).await.unwrap();
-    assert_eq!(anon_put_resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(anon_put_resp.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test(flavor = "multi_thread")]
