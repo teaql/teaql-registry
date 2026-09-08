@@ -14,6 +14,8 @@ SERVER_LOG="${RESULTS_DIR}/server.txt"
 MEMORY_LOG="${RESULTS_DIR}/memory.csv"
 SERVER_PID=""
 MONITOR_PID=""
+SOURCE_GIT_COMMIT="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+SOURCE_GIT_DIRTY="$(if [[ -z "$(git -C "${REPOSITORY_ROOT}" status --porcelain)" ]]; then echo false; else echo true; fi)"
 
 required_variables=(
   ADMIN_PASSWORD
@@ -90,6 +92,8 @@ MONITOR_PID=$!
 
 REGISTRY_URL="http://127.0.0.1:${REGISTRY_PORT}" \
   CREDENTIALS_DIR="${CREDENTIALS_DIR}" \
+  SOURCE_GIT_COMMIT="${SOURCE_GIT_COMMIT}" \
+  SOURCE_GIT_DIRTY="${SOURCE_GIT_DIRTY}" \
   BENCH_MODE=persistent-s3 \
   BENCH_RUN_ID="${RUN_ID}" \
   BENCH_RESULTS_DIR="${RESULTS_DIR}" \

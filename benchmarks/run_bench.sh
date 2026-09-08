@@ -12,6 +12,8 @@ RUN_ID="${BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RESULTS_DIR="${BENCH_RESULTS_DIR:-${SCRIPT_DIR}/results/${RUN_ID}}"
 PAYLOAD_DIR="$(mktemp -d /tmp/teaql-registry-bench.XXXXXX)"
 RESPONSE_FILE="${PAYLOAD_DIR}/response.txt"
+SOURCE_GIT_COMMIT="${SOURCE_GIT_COMMIT:-$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)}"
+SOURCE_GIT_DIRTY="${SOURCE_GIT_DIRTY:-$(if [[ -z "$(git -C "${REPOSITORY_ROOT}" status --porcelain)" ]]; then echo false; else echo true; fi)}"
 
 cleanup() {
   rm -rf "${PAYLOAD_DIR}"
@@ -80,8 +82,8 @@ perl -e '
 {
   echo "run_id=${RUN_ID}"
   echo "recorded_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "git_commit=$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
-  echo "git_dirty=$(if [[ -z "$(git -C "${REPOSITORY_ROOT}" status --porcelain)" ]]; then echo false; else echo true; fi)"
+  echo "git_commit=${SOURCE_GIT_COMMIT}"
+  echo "git_dirty=${SOURCE_GIT_DIRTY}"
   echo "registry_url=${REGISTRY_URL}"
   echo "mode=${BENCH_MODE}"
   echo "iterations=${BENCH_ITERATIONS}"
