@@ -1,0 +1,21 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< org.apache.maven:standalone-pom >-------------------
+[INFO] Building Maven Stub Project (No POM) 1
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --- deploy:3.1.4:deploy-file (default-cli) @ standalone-pom ---
+[INFO] pom.xml not found in native-probe-20260909-native-clients.jar
+[INFO] Uploading to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/0.0.1/native-probe-20260909-native-clients-0.0.1.jar
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/0.0.1/native-probe-20260909-native-clients-0.0.1.jar (475 B at 860 B/s)
+[INFO] Uploading to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/0.0.1/native-probe-20260909-native-clients-0.0.1.pom
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/0.0.1/native-probe-20260909-native-clients-0.0.1.pom (424 B at 1.8 kB/s)
+[INFO] Downloading from teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/maven-metadata.xml
+[INFO] Uploading to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/maven-metadata.xml
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18083/repository/maven-releases/io/teaql/probe/native-probe-20260909-native-clients/maven-metadata.xml (330 B at 921 B/s)
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.976 s
+[INFO] Finished at: 2026-09-09T00:49:31+08:00
+[INFO] ------------------------------------------------------------------------

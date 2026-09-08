@@ -1,0 +1,12 @@
+run_id=20260909-native-clients
+recorded_at_utc=2026-09-08T16:49:26Z
+git_commit=b1c5f026c44425312baca59076ed22abcd02fe71
+git_dirty=false
+registry_url=http://127.0.0.1:18083
+maven=Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)
+npm=11.17.0
+python=Python 3.10.12
+cargo=cargo 1.97.1 (c980f4866 2026-06-30)
+go=go version go1.18.1 linux/amd64
+dotnet=8.0.130
+docker=Docker version 29.1.3, build 29.1.3-0ubuntu3~22.04.2

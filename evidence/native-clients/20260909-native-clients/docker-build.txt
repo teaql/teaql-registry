@@ -1,0 +1,11 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  3.072kB
+Step 1/2 : FROM scratch
+ ---> 
+Step 2/2 : COPY probe.txt /probe.txt
+ ---> 34e7417b07fe
+Successfully built 34e7417b07fe
+Successfully tagged 127.0.0.1:18083/docker-hosted:native-probe-20260909-native-clients

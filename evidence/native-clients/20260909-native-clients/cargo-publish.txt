@@ -1,0 +1,11 @@
+    Updating `teaql` index
+   Packaging teaql-native-probe-20260909-native-clients v0.0.1 (/tmp/teaql-registry-native.B7lJ0k/cargo/package)
+    Packaged 4 files, 1.2KiB (815B compressed)
+   Verifying teaql-native-probe-20260909-native-clients v0.0.1 (/tmp/teaql-registry-native.B7lJ0k/cargo/package)
+   Compiling teaql-native-probe-20260909-native-clients v0.0.1 (/home/philip/shared-cargo-target/package/teaql-native-probe-20260909-native-clients-0.0.1)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+   Uploading teaql-native-probe-20260909-native-clients v0.0.1 (/tmp/teaql-registry-native.B7lJ0k/cargo/package)
+    Uploaded teaql-native-probe-20260909-native-clients v0.0.1 to registry `teaql`
+note: waiting for teaql-native-probe-20260909-native-clients v0.0.1 to be available at registry `teaql`
+help: you may press ctrl-c to skip waiting; the crate should be available shortly
+   Published teaql-native-probe-20260909-native-clients v0.0.1 at registry `teaql`
