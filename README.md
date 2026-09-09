@@ -52,7 +52,7 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
 
 ## Key Features
 
-- **8 Package Ecosystems Supported Out of the Box**:
+- **9 Package Ecosystems Supported Out of the Box**:
   - **Docker Registry v2**: Monolithic & chunked layer push/pull, manifest management.
   - **Maven2**: Release and snapshot JAR/POM uploads, SHA-1 / SHA-256 checksums.
   - **NPM**: Standard `npm publish` / `npm install` and tarball distribution.
@@ -60,6 +60,7 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - **Cargo (Rust)**: Sparse Index protocol support, crate publish and download.
   - **Go Modules**: GOPROXY specification compliance (`.info`, `.mod`, `.zip`).
   - **NuGet (.NET)**: NuGet v3 Flat Container protocol and `dotnet nuget push`.
+  - **Swift Package Registry**: Native SwiftPM publish, resolution, manifest, source archive, checksum, and URL-to-package lookup APIs.
   - **Raw**: Arbitrary binary tools, archives, and files over HTTP.
 - **Pure In-Memory High-Performance Mode (`--memory-mode` / `MEMORY_MODE=true`)**:
   - In-memory volatile RAM blob storage designed for specialized scenarios requiring maximum throughput and zero I/O latency.
@@ -102,7 +103,7 @@ teaql-registry/
 ├── models/              # TeaQL domain entity and metadata schema (model.xml)
 ├── rust-lib-core/       # Type-safe model operations & audited data layer (teaql-registry-core)
 ├── rust-web-axum/       # Protocol engines, S3 storage, REST APIs & embedded UI (teaql-registry)
-├── demo-components/     # Demo sample artifacts for all 8 formats & publish script
+├── demo-components/     # Demo sample artifacts and publish script
 └── docker-compose.yml   # Complete environment setup (PostgreSQL + RustFS + Registry)
 ```
 
@@ -168,11 +169,29 @@ registry-tui
 | `t` | Generate temporary token |
 | `q` | Quit |
 
-### 3. Seed Demo Packages (All 8 Formats)
+### 3. Seed Demo Packages
 
-Publish live sample artifacts across all 8 ecosystems in one command:
+Publish live sample artifacts across the original eight fixture formats in one command:
 ```bash
 ./demo-components/publish_all_demos.sh
+```
+
+For native Swift package publication and consumption, configure the hosted
+registry as follows (use HTTPS outside local development):
+
+```bash
+swift package-registry set --allow-insecure-http \
+  http://localhost:8081/repository/swift-hosted/swift
+swift package-registry publish teaql.MyPackage 1.0.0 \
+  --url http://localhost:8081/repository/swift-hosted/swift \
+  --allow-insecure-http
+```
+
+The controlled native-client suite uses these commands and then resolves and
+builds a clean consumer through SwiftPM:
+
+```bash
+./scripts/verify_native_clients.sh
 ```
 
 ### 4. Build and Run from Source

@@ -54,11 +54,8 @@ pub async fn list_repositories(
             let items: Vec<RepositoryItemXO> = repos
                 .into_iter()
                 .map(|r| {
-                    let format = if r.recipe_name().contains("maven") {
-                        "maven2"
-                    } else {
-                        "raw"
-                    };
+                    let recipe = r.recipe_name();
+                    let format = recipe.split('-').next().unwrap_or("raw");
                     let r_type = if r.recipe_name().ends_with("hosted") {
                         "hosted"
                     } else if r.recipe_name().ends_with("proxy") {
@@ -90,11 +87,8 @@ pub async fn get_repository(
 ) -> Response {
     match RepositoryService::find_by_name(&request.runtime, &name).await {
         Ok(Some(r)) => {
-            let format = if r.recipe_name().contains("maven") {
-                "maven2"
-            } else {
-                "raw"
-            };
+            let recipe = r.recipe_name();
+            let format = recipe.split('-').next().unwrap_or("raw");
             let r_type = if r.recipe_name().ends_with("hosted") {
                 "hosted"
             } else if r.recipe_name().ends_with("proxy") {

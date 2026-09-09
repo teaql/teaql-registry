@@ -375,6 +375,7 @@ fn render_block_to_lines(
                     "dotnet nuget add source {}{}/v3/index.json -n {}",
                     endpoint, repo.url, repo.name
                 ),
+                "swift" => format!("swift package-registry set {}{}/swift", endpoint, repo.url),
                 _ => format!("curl -O {}{}/PATH", endpoint, repo.url),
             };
             lines.push(Line::from(Span::styled(
@@ -651,6 +652,10 @@ fn component_usage_snippet(component: &crate::types::ComponentItem) -> String {
         "nuget" => format!(
             "dotnet add package {} --version {}",
             component.name, component.version
+        ),
+        "swift" => format!(
+            ".package(id: \"{}.{}\", exact: \"{}\")",
+            component.group, component.name, component.version
         ),
         "docker" => format!(
             "docker pull {}:{}",

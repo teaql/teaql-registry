@@ -24,21 +24,21 @@ use teaql_macros::{teaql_entity, TeaqlEntity};
     data_service = "postgres"
 )]
 pub struct WritePolicy {
-    // @source model.xml:68
+    // @source model.xml:69
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:68
+    // @source model.xml:69
     name: String,
 
-    // @source model.xml:68
+    // @source model.xml:69
     code: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:68
+    // @source model.xml:69
     #[teaql(column = "platform")]
     platform_id: u64,
-    // @source model.xml:68
+    // @source model.xml:69
     #[teaql(relation(target = "Platform", local_key = "platform_id", foreign_key = "id"))]
     platform: Option<Box<crate::Platform>>,
     #[teaql(dynamic)]

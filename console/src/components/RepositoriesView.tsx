@@ -22,7 +22,7 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
   const [remoteUrl, setRemoteUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const formats = ['ALL', 'maven2', 'docker', 'npm', 'pypi', 'gomod', 'cargo', 'nuget', 'raw'];
+  const formats = ['ALL', 'maven2', 'docker', 'npm', 'pypi', 'gomod', 'cargo', 'nuget', 'swift', 'raw'];
 
   const filteredRepos = repositories.filter((repo) => {
     if (activeFilter === 'ALL') return true;
@@ -150,6 +150,7 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
                   <option value="cargo">Cargo (Rust)</option>
                   <option value="gomod">Go Modules</option>
                   <option value="nuget">NuGet (.NET)</option>
+                  <option value="swift">Swift Package</option>
                   <option value="raw">Raw (Generic)</option>
                 </select>
               </div>

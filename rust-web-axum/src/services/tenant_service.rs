@@ -212,6 +212,14 @@ impl TenantService {
                 "ALLOW_WRITE",
                 "",
             ),
+            (
+                "swift-hosted",
+                "swift-hosted",
+                "HOSTED",
+                "SWIFT",
+                "ALLOW_ONCE",
+                "",
+            ),
         ];
 
         for (name, recipe, rtype, fmt, wpolicy, rurl) in format_repos {

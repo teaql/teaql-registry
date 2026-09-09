@@ -20,43 +20,43 @@ pub struct RepositoryConfiguration {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:126
+    // @source model.xml:127
     name: String,
 
-    // @source model.xml:126
+    // @source model.xml:127
     recipe_name: String,
 
-    // @source model.xml:126
+    // @source model.xml:127
     online: bool,
 
-    // @source model.xml:126
+    // @source model.xml:127
     remote_url: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(column = "tenant")]
     tenant_id: u64,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(column = "repository_type")]
     repository_type_id: u64,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(column = "repository_format")]
     repository_format_id: u64,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(column = "write_policy")]
     write_policy_id: u64,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(column = "blob_store")]
     blob_store_id: u64,
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(relation(
         target = "RepositoryType",
         local_key = "repository_type_id",
@@ -64,7 +64,7 @@ pub struct RepositoryConfiguration {
     ))]
     repository_type: Option<Box<crate::RepositoryType>>,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(relation(
         target = "RepositoryFormat",
         local_key = "repository_format_id",
@@ -72,7 +72,7 @@ pub struct RepositoryConfiguration {
     ))]
     repository_format: Option<Box<crate::RepositoryFormat>>,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(relation(
         target = "WritePolicy",
         local_key = "write_policy_id",
@@ -80,7 +80,7 @@ pub struct RepositoryConfiguration {
     ))]
     write_policy: Option<Box<crate::WritePolicy>>,
 
-    // @source model.xml:126
+    // @source model.xml:127
     #[teaql(relation(
         target = "BlobStoreConfiguration",
         local_key = "blob_store_id",
@@ -573,6 +573,13 @@ impl RepositoryConfiguration {
 
     pub fn repository_format_is_nuget(&self) -> bool {
         self.repository_format_id() == 1008_u64
+    }
+    pub fn update_repository_format_to_swift(&mut self) -> &mut Self {
+        self.update_repository_format_id(1009_u64)
+    }
+
+    pub fn repository_format_is_swift(&self) -> bool {
+        self.repository_format_id() == 1009_u64
     }
 
     pub fn update_write_policy_to_allow_write(&mut self) -> &mut Self {

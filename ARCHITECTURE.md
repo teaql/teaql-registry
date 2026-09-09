@@ -14,7 +14,7 @@ TeaQL Registry is an extensible multi-format artifact and package repository ser
    All artifact read, write, check, and deletion workflows operate against the `BlobStore` trait. Concrete backends (S3/RustFS/MinIO, POSIX Filesystem, or In-Memory) can be swapped or dynamically managed without touching API or format engine logic.
 
 3. **Open-Closed Repository Protocol Dispatch (`RepositoryHandler` & `RepositoryRegistry`)**:
-   Each package management ecosystem (Docker, Maven, NPM, PyPI, Cargo, Go, NuGet, Raw) is modeled as a pluggable `RepositoryHandler`. Adding new package formats requires implementing the handler interface and registering it, leaving existing dispatcher logic closed for modification.
+   Each package management ecosystem (Docker, Maven, NPM, PyPI, Cargo, Go, NuGet, Swift, Raw) is modeled as a pluggable `RepositoryHandler`. Adding new package formats requires implementing the handler interface and registering it, leaving existing dispatcher logic closed for modification.
 
 4. **Runtime Boundary Multi-Tenancy (`TeaQLRegistryTenantRequestPolicy`)**:
    Tenant data boundary enforcement occurs at the TeaQL query execution boundary. Queries automatically inject tenant scoping filters via `RequestPolicy` hooks.
@@ -145,5 +145,5 @@ pub trait RegistryContextExt {
 
 All layers are verified using automated end-to-end and contract tests:
 1. **Contract Tests**: `test_*_blobstore_contract` runs identical assertion suites against `MemoryBlobStore`, `FileBlobStore`, and `S3BlobStore` (RustFS).
-2. **Protocol Integration Tests**: End-to-end lifecycle verification for Cargo, Docker, Go Modules, Maven, NPM, NuGet, PyPI, and Raw.
+2. **Protocol Integration Tests**: End-to-end lifecycle verification for Cargo, Docker, Go Modules, Maven, NPM, NuGet, PyPI, Swift Package Registry, and Raw.
 3. **Multi-Tenancy Isolation Tests**: Verifies tenant query boundary enforcement and storage isolation.

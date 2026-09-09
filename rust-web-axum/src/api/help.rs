@@ -87,6 +87,8 @@ const HELP_TEXT: &str = r#"TeaQL Registry — Quick Start Guide
    Cargo:  PUT /repository/<name>/api/v1/crates/new
    Go:     GET /repository/<name>/gomod/<path> (GOPROXY)
    NuGet:  PUT /repository/<name>/v3/package   (dotnet nuget push)
+   Swift:  PUT /repository/<name>/swift/<scope>/<package>/<version>
+           (swift package-registry publish)
    Raw:    PUT /repository/<name>/<path>       (arbitrary files)
 
 5. WEB CONSOLE

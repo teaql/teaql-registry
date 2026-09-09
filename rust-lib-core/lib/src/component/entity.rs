@@ -20,26 +20,26 @@ pub struct Component {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:145
+    // @source model.xml:146
     namespace: String,
 
-    // @source model.xml:145
+    // @source model.xml:146
     name: String,
 
-    // @source model.xml:145
+    // @source model.xml:146
     version_name: String,
 
-    // @source model.xml:145
+    // @source model.xml:146
     normalized_version: String,
 
-    // @source model.xml:145
+    // @source model.xml:146
     kind: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:145
+    // @source model.xml:146
     #[teaql(column = "content_repository")]
     content_repository_id: u64,
-    // @source model.xml:145
+    // @source model.xml:146
     #[teaql(relation(
         target = "ContentRepository",
         local_key = "content_repository_id",

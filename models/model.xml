@@ -54,6 +54,7 @@
         <_value id="1006" name="Go Modules" code="GOMOD" />
         <_value id="1007" name="Cargo" code="CARGO" />
         <_value id="1008" name="NuGet" code="NUGET" />
+        <_value id="1009" name="Swift Package" code="SWIFT" />
     </repository_format>
 
     <write_policy

@@ -35,34 +35,34 @@ pub struct SecurityUser {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:180
+    // @source model.xml:181
     username: String,
 
-    // @source model.xml:180
+    // @source model.xml:181
     first_name: String,
 
-    // @source model.xml:180
+    // @source model.xml:181
     last_name: String,
 
-    // @source model.xml:180
+    // @source model.xml:181
     password_hash: String,
 
-    // @source model.xml:180
+    // @source model.xml:181
     email: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:180
+    // @source model.xml:181
     #[teaql(column = "tenant")]
     tenant_id: u64,
 
-    // @source model.xml:180
+    // @source model.xml:181
     #[teaql(column = "user_status")]
     user_status_id: u64,
-    // @source model.xml:180
+    // @source model.xml:181
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
 
-    // @source model.xml:180
+    // @source model.xml:181
     #[teaql(relation(
         target = "UserStatus",
         local_key = "user_status_id",

@@ -24,21 +24,21 @@ use teaql_macros::{teaql_entity, TeaqlEntity};
     data_service = "postgres"
 )]
 pub struct UserStatus {
-    // @source model.xml:97
+    // @source model.xml:98
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:97
+    // @source model.xml:98
     name: String,
 
-    // @source model.xml:97
+    // @source model.xml:98
     code: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:97
+    // @source model.xml:98
     #[teaql(column = "platform")]
     platform_id: u64,
-    // @source model.xml:97
+    // @source model.xml:98
     #[teaql(relation(target = "Platform", local_key = "platform_id", foreign_key = "id"))]
     platform: Option<Box<crate::Platform>>,
     #[teaql(dynamic)]

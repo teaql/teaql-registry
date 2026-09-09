@@ -1594,6 +1594,14 @@ impl<R> RepositoryFormatRequest<R> {
         self.with_id_is_not("1008")
     }
 
+    pub fn with_id_is_value_1009(self) -> Self {
+        self.with_id_is("1009")
+    }
+
+    pub fn with_id_is_not_value_1009(self) -> Self {
+        self.with_id_is_not("1009")
+    }
+
     pub fn with_name_is_maven2(self) -> Self {
         self.with_name_is("Maven2")
     }
@@ -1658,6 +1666,14 @@ impl<R> RepositoryFormatRequest<R> {
         self.with_name_is_not("NuGet")
     }
 
+    pub fn with_name_is_swift_package(self) -> Self {
+        self.with_name_is("Swift Package")
+    }
+
+    pub fn with_name_is_not_swift_package(self) -> Self {
+        self.with_name_is_not("Swift Package")
+    }
+
     pub fn with_code_is_maven2(self) -> Self {
         self.with_code_is("MAVEN2")
     }
@@ -1720,6 +1736,14 @@ impl<R> RepositoryFormatRequest<R> {
 
     pub fn with_code_is_not_nuge_t(self) -> Self {
         self.with_code_is_not("NUGET")
+    }
+
+    pub fn with_code_is_swif_t(self) -> Self {
+        self.with_code_is("SWIFT")
+    }
+
+    pub fn with_code_is_not_swif_t(self) -> Self {
+        self.with_code_is_not("SWIFT")
     }
 
     pub fn filter_by_platform(mut self, value: impl EntityReference) -> Self {

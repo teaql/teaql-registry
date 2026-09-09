@@ -993,6 +993,57 @@ fn ensure_generated_bootstrap<'a>(
             )
             .await?;
         }
+        let rows_constant_repository_format_1009 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1009_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1009) =
+            rows_constant_repository_format_1009.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1009.platform_id() != 1_u64 {
+                constant_repository_format_1009.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1009.name() != "Swift Package" {
+                constant_repository_format_1009.update_name("Swift Package");
+                changed = true;
+            }
+            if constant_repository_format_1009.code() != "SWIFT" {
+                constant_repository_format_1009.update_code("SWIFT");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1009
+                        .audit_as("reconcile model constant RepositoryFormat(1009)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1009 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1009.update_id(1009_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1009,
+                RepositoryFormat::ENTITY_NAME,
+                1009_u64,
+            )?;
+            constant_repository_format_1009.update_platform_id(1_u64);
+            constant_repository_format_1009.update_name("Swift Package");
+            constant_repository_format_1009.update_code("SWIFT");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1009
+                    .audit_as("create model constant RepositoryFormat(1009)"),
+                context,
+            )
+            .await?;
+        }
         let rows_constant_write_policy_1001 = crate::Q::write_policies()
             .select_self_fields()
             .with_id_is(1001_u64)

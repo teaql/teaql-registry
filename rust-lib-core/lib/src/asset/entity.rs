@@ -16,24 +16,24 @@ pub struct Asset {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:167
+    // @source model.xml:168
     component_id: i64,
 
-    // @source model.xml:167
+    // @source model.xml:168
     path: String,
 
-    // @source model.xml:167
+    // @source model.xml:168
     kind: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:167
+    // @source model.xml:168
     #[teaql(column = "content_repository")]
     content_repository_id: u64,
 
-    // @source model.xml:167
+    // @source model.xml:168
     #[teaql(column = "asset_blob")]
     asset_blob_id: u64,
-    // @source model.xml:167
+    // @source model.xml:168
     #[teaql(relation(
         target = "ContentRepository",
         local_key = "content_repository_id",
@@ -41,7 +41,7 @@ pub struct Asset {
     ))]
     content_repository: Option<Box<crate::ContentRepository>>,
 
-    // @source model.xml:167
+    // @source model.xml:168
     #[teaql(relation(target = "AssetBlob", local_key = "asset_blob_id", foreign_key = "id"))]
     asset_blob: Option<Box<crate::AssetBlob>>,
     #[teaql(dynamic)]

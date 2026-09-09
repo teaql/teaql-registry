@@ -27,29 +27,29 @@ pub struct AssetBlob {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:157
+    // @source model.xml:158
     blob_ref: String,
 
-    // @source model.xml:157
+    // @source model.xml:158
     blob_size: i64,
 
-    // @source model.xml:157
+    // @source model.xml:158
     content_type: String,
 
-    // @source model.xml:157
+    // @source model.xml:158
     sha1_checksum: String,
 
-    // @source model.xml:157
+    // @source model.xml:158
     sha256_checksum: String,
 
-    // @source model.xml:157
+    // @source model.xml:158
     md5_checksum: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:157
+    // @source model.xml:158
     #[teaql(column = "blob_store")]
     blob_store_id: u64,
-    // @source model.xml:157
+    // @source model.xml:158
     #[teaql(relation(
         target = "BlobStoreConfiguration",
         local_key = "blob_store_id",

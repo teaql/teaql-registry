@@ -2097,7 +2097,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_types_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_repository_type_matching(dynamic_query);
@@ -2127,7 +2127,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_types_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_repository_type_matching(dynamic_query);
@@ -2250,7 +2250,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_formats_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_repository_format_matching(dynamic_query);
@@ -2280,7 +2280,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::repository_formats_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_repository_format_matching(dynamic_query);
@@ -2405,7 +2405,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::write_policies_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().with_write_policy_matching(dynamic_query);
@@ -2435,7 +2435,7 @@ impl<R> RepositoryConfigurationRequest<R> {
     /// 2. **Advanced**: Only use this method when you need to perform advanced searches, dynamic subqueries, or filter based on complex relation conditions.
     ///
     /// # Example
-    /// ```text
+    /// ```rust
     /// // Only use when building dynamic queries
     /// let dynamic_query = crate::Q::write_policies_minimal().filter(...);
     /// let request = crate::Q::repository_configurations().without_write_policy_matching(dynamic_query);
@@ -2764,6 +2764,17 @@ impl<R> RepositoryConfigurationRequest<R> {
         self.query = self
             .query
             .and_filter(Expr::ne("repository_format_id", 1008_u64));
+        self
+    }
+
+    pub fn with_repository_format_is_swift(self) -> Self {
+        self.filter_by_repository_format(1009_u64)
+    }
+
+    pub fn with_repository_format_is_not_swift(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1009_u64));
         self
     }
 

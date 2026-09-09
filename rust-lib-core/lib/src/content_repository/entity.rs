@@ -34,17 +34,17 @@ pub struct ContentRepository {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:134
+    // @source model.xml:135
     repository_id: i64,
 
-    // @source model.xml:134
+    // @source model.xml:135
     format_name: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:134
+    // @source model.xml:135
     #[teaql(column = "tenant")]
     tenant_id: u64,
-    // @source model.xml:134
+    // @source model.xml:135
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
     #[teaql(dynamic)]

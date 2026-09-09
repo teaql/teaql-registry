@@ -21,46 +21,46 @@ pub struct PersonalAccessToken {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:235
+    // @source model.xml:236
     username: String,
 
-    // @source model.xml:235
+    // @source model.xml:236
     token_id: String,
 
-    // @source model.xml:235
+    // @source model.xml:236
     token_hash: String,
 
-    // @source model.xml:235
+    // @source model.xml:236
     description: String,
 
-    // @source model.xml:235
+    // @source model.xml:236
     scopes: String,
 
-    // @source model.xml:235
+    // @source model.xml:236
     created_at: teaql_core::time::Timestamp,
 
-    // @source model.xml:235
+    // @source model.xml:236
     expires_at_epoch_millis: i64,
 
-    // @source model.xml:235
+    // @source model.xml:236
     revoked: bool,
 
-    // @source model.xml:235
+    // @source model.xml:236
     revoked_at_epoch_millis: i64,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:235
+    // @source model.xml:236
     #[teaql(column = "tenant")]
     tenant_id: u64,
 
-    // @source model.xml:235
+    // @source model.xml:236
     #[teaql(column = "security_user")]
     security_user_id: u64,
-    // @source model.xml:235
+    // @source model.xml:236
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
 
-    // @source model.xml:235
+    // @source model.xml:236
     #[teaql(relation(
         target = "SecurityUser",
         local_key = "security_user_id",

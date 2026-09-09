@@ -12,7 +12,7 @@ use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, MemoryBlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
-    services::{BlobStoreService, RepositoryService},
+    services::{BlobStoreService, RepositoryService, TenantService},
 };
 use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
@@ -25,6 +25,21 @@ async fn setup_multiformat_test_app() -> axum::Router {
             .expect("Runtime connect error"),
     );
     runtime.ensure_schema().await.expect("Schema init error");
+    if TenantService::find_tenant_by_code(&runtime, "default")
+        .await
+        .unwrap()
+        .is_none()
+    {
+        TenantService::create_tenant_with_platform(
+            &runtime,
+            1,
+            "Default Tenant",
+            "default",
+            "Test tenant",
+        )
+        .await
+        .unwrap();
+    }
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("multi-blobs"));
     blobstore.init().await.expect("Blobstore init error");
@@ -45,6 +60,7 @@ async fn setup_multiformat_test_app() -> axum::Router {
         ("gomod-hosted", "GOMOD"),
         ("cargo-hosted", "CARGO"),
         ("nuget-hosted", "NUGET"),
+        ("swift-hosted", "SWIFT"),
     ];
 
     for (name, fmt) in format_repos {
@@ -66,6 +82,169 @@ async fn setup_multiformat_test_app() -> axum::Router {
     }
 
     build_app(AppState::new(runtime, blobstore))
+}
+
+fn swift_package_archive(package_id: &str) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    use zip::{write::SimpleFileOptions, ZipWriter};
+
+    let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+    writer
+        .start_file(
+            format!("{package_id}/Package.swift"),
+            SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer
+        .write_all(
+            br#"// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "TeaQLProbe",
+    products: [.library(name: "TeaQLProbe", targets: ["TeaQLProbe"])],
+    targets: [.target(name: "TeaQLProbe")]
+)
+"#,
+        )
+        .unwrap();
+    writer
+        .start_file(
+            format!("{package_id}/Sources/TeaQLProbe/TeaQLProbe.swift"),
+            SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer
+        .write_all(b"public let teaqlProbe = \"ok\"\n")
+        .unwrap();
+    writer.finish().unwrap().into_inner()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_swift_package_registry_lifecycle() {
+    let app = setup_multiformat_test_app().await;
+    let package = format!("probe{}", uuid::Uuid::new_v4().simple());
+    let package_id = format!("teaql.{package}");
+    let archive = swift_package_archive(&package_id);
+    let boundary = "teaql-swift-registry-boundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"source-archive\"; filename=\"{package_id}-1.2.3.zip\"\r\nContent-Type: application/zip\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(&archive);
+    body.extend_from_slice(
+        format!(
+            "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"description\":\"native Swift package\",\"repositoryURLs\":[\"https://github.com/teaql/{package}\"]}}\r\n--{boundary}--\r\n"
+        )
+        .as_bytes(),
+    );
+
+    let publish_uri = format!("/repository/swift-hosted/swift/teaql/{package}/1.2.3");
+    let publish = Request::builder()
+        .method(Method::PUT)
+        .uri(&publish_uri)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(body.clone()))
+        .unwrap();
+    let response = app.clone().oneshot(publish).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.headers()["content-version"], "1");
+
+    let duplicate = Request::builder()
+        .method(Method::PUT)
+        .uri(&publish_uri)
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(duplicate).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+
+    let list = Request::builder()
+        .uri(format!("/repository/swift-hosted/swift/teaql/{package}"))
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(list).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let list_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        list_json["releases"]["1.2.3"]["url"],
+        format!("https://registry.example.test:7443/repository/swift-hosted/swift/teaql/{package}/1.2.3")
+    );
+
+    let metadata = Request::builder()
+        .uri(&publish_uri)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(metadata).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let metadata_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata_json["id"], package_id);
+    assert_eq!(metadata_json["version"], "1.2.3");
+    assert_eq!(
+        metadata_json["resources"][0]["checksum"],
+        hex::encode(sha2::Sha256::digest(&archive))
+    );
+
+    let manifest = Request::builder()
+        .uri(format!("{publish_uri}/Package.swift"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(manifest).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/x-swift");
+    let manifest_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&manifest_bytes).contains("TeaQLProbe"));
+
+    let download = Request::builder()
+        .uri(format!(
+            "/repository/swift-hosted/swift/teaql/{package}/1.2.3.zip"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().contains_key("digest"));
+    let downloaded = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(downloaded.as_ref(), archive);
+
+    let identifiers = Request::builder()
+        .uri(format!(
+            "/repository/swift-hosted/swift/identifiers?url=https%3A%2F%2Fgithub.com%2Fteaql%2F{package}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(identifiers).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let identifiers_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(identifiers_json["identifiers"][0], package_id);
 }
 
 #[tokio::test(flavor = "multi_thread")]

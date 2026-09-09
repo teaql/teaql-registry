@@ -34,23 +34,23 @@ pub struct SecurityRole {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:190
+    // @source model.xml:191
     role_id: String,
 
-    // @source model.xml:190
+    // @source model.xml:191
     name: String,
 
-    // @source model.xml:190
+    // @source model.xml:191
     description: String,
 
-    // @source model.xml:190
+    // @source model.xml:191
     read_only: bool,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:190
+    // @source model.xml:191
     #[teaql(column = "tenant")]
     tenant_id: u64,
-    // @source model.xml:190
+    // @source model.xml:191
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
     #[teaql(dynamic)]

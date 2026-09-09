@@ -156,6 +156,8 @@ async fn test_user_context_tenant_isolation() {
 
     assert!(repos_a.iter().any(|r| r.name() == "maven-releases"));
     assert!(repos_b.iter().any(|r| r.name() == "maven-releases"));
+    assert!(repos_a.iter().any(|r| r.name() == "swift-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "swift-hosted"));
     assert_ne!(repos_a[0].id(), repos_b[0].id());
 
     // 5. Verify BlobStore isolation transparently via UserContext

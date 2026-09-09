@@ -27,29 +27,29 @@ pub struct SecurityPrivilege {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:202
+    // @source model.xml:203
     privilege_id: String,
 
-    // @source model.xml:202
+    // @source model.xml:203
     name: String,
 
-    // @source model.xml:202
+    // @source model.xml:203
     description: String,
 
-    // @source model.xml:202
+    // @source model.xml:203
     privilege_type: String,
 
-    // @source model.xml:202
+    // @source model.xml:203
     permission_pattern: String,
 
-    // @source model.xml:202
+    // @source model.xml:203
     read_only: bool,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:202
+    // @source model.xml:203
     #[teaql(column = "tenant")]
     tenant_id: u64,
-    // @source model.xml:202
+    // @source model.xml:203
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
     #[teaql(dynamic)]

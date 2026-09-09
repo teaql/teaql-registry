@@ -22,7 +22,7 @@ else
   ADMIN_PASSWORD_VALUE="${ADMIN_PASSWORD}"
 fi
 
-required_commands=(base64 cargo curl docker dotnet go jar jq mvn npm perl python3 sha256sum unzip zip)
+required_commands=(base64 cargo curl docker dotnet go jar jq mvn npm perl python3 sha256sum swift unzip zip)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "error: required native client or build tool is missing: ${command_name}" >&2
@@ -91,6 +91,7 @@ TOKEN_ID="$(jq -er '.pat.id' <<<"${TOKEN_RESPONSE}")"
   echo "cargo=$(cargo --version)"
   echo "go=$(go version)"
   echo "dotnet=$(dotnet --version)"
+  echo "swift=$(swift --version | head -n 1)"
   echo "docker=$(docker --version)"
 } >"${RESULTS_DIR}/environment.txt"
 
@@ -105,6 +106,7 @@ Credentials are intentionally represented as `<redacted>`.
 - Cargo: `cargo publish --registry teaql`, then `cargo fetch` from the sparse registry.
 - Go modules: fixture publication followed by `go mod download` through `GOPROXY` (Go has no native publish operation).
 - NuGet: `dotnet nuget push`, then `dotnet restore` from the v3 service index.
+- Swift: `swift package-registry publish`, then registry-backed `swift package resolve` and `swift build`.
 - Docker: `docker push`, local image removal, then `docker pull`.
 - Raw: authenticated HTTP PUT and GET with SHA-256 comparison (there is no ecosystem package manager).
 EOF
@@ -267,6 +269,56 @@ run_step nuget-consume dotnet add "${WORK_DIR}/nuget/consumer" package "${NUGET_
 run_step nuget-restore dotnet restore "${WORK_DIR}/nuget/consumer" \
   --configfile "${WORK_DIR}/nuget/NuGet.Config"
 printf 'NuGet\tPASS\tPASS\n' >>"${SUMMARY}"
+
+# Swift Package Registry
+SWIFT_PACKAGE="nativeprobe${RUN_ID}"
+SWIFT_PACKAGE_ID="teaql.${SWIFT_PACKAGE}"
+SWIFT_REGISTRY_URL="${REGISTRY_URL}/repository/swift-hosted/swift"
+mkdir -p "${WORK_DIR}/swift/package/Sources/TeaQLNativeProbe" \
+  "${WORK_DIR}/swift/consumer/Sources/Consumer"
+cat >"${WORK_DIR}/swift/package/Package.swift" <<'EOF'
+// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "TeaQLNativeProbe",
+    products: [.library(name: "TeaQLNativeProbe", targets: ["TeaQLNativeProbe"])],
+    targets: [.target(name: "TeaQLNativeProbe")]
+)
+EOF
+printf 'public let teaqlNativeProbe = "%s"\n' "${RUN_ID}" > \
+  "${WORK_DIR}/swift/package/Sources/TeaQLNativeProbe/Probe.swift"
+cat >"${WORK_DIR}/swift/consumer/Package.swift" <<EOF
+// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "TeaQLNativeConsumer",
+    dependencies: [.package(id: "${SWIFT_PACKAGE_ID}", exact: "0.0.1")],
+    targets: [.executableTarget(name: "Consumer", dependencies: [
+        .product(name: "TeaQLNativeProbe", package: "${SWIFT_PACKAGE_ID}")
+    ])]
+)
+EOF
+cat >"${WORK_DIR}/swift/consumer/Sources/Consumer/main.swift" <<'EOF'
+import TeaQLNativeProbe
+print(teaqlNativeProbe)
+EOF
+SWIFT_INSECURE_ARGS=()
+if [[ "${SWIFT_REGISTRY_URL}" == http://* ]]; then
+  SWIFT_INSECURE_ARGS=(--allow-insecure-http)
+fi
+run_step swift-publish bash -c 'cd "$1" && shift && exec "$@"' _ \
+  "${WORK_DIR}/swift/package" env SWIFTPM_REGISTRY_TOKEN="${PAT}" \
+  swift package-registry publish "${SWIFT_PACKAGE_ID}" 0.0.1 \
+  --url "${SWIFT_REGISTRY_URL}" "${SWIFT_INSECURE_ARGS[@]}"
+run_step swift-registry-config bash -c 'cd "$1" && shift && exec "$@"' _ \
+  "${WORK_DIR}/swift/consumer" swift package-registry set \
+  "${SWIFT_INSECURE_ARGS[@]}" "${SWIFT_REGISTRY_URL}"
+run_step swift-consume bash -c 'cd "$1" && shift && exec "$@"' _ \
+  "${WORK_DIR}/swift/consumer" env SWIFTPM_REGISTRY_TOKEN="${PAT}" \
+  swift package resolve
+run_step swift-build bash -c 'cd "$1" && shift && exec "$@"' _ \
+  "${WORK_DIR}/swift/consumer" env SWIFTPM_REGISTRY_TOKEN="${PAT}" swift build
+printf 'Swift\tPASS\tPASS\n' >>"${SUMMARY}"
 
 # Docker
 # The current Docker API maps the first path segment to the configured TeaQL

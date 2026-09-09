@@ -6,6 +6,7 @@ pub mod npm;
 pub mod nuget;
 pub mod pypi;
 pub mod raw;
+pub mod swift;
 
 pub use cargo::{get_cargo_index_path, CargoIndexConfig, CargoIndexRecord};
 pub use docker::{
@@ -18,3 +19,8 @@ pub use npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail};
 pub use nuget::{create_nuget_service_index, NuGetPackageVersions, NuGetServiceIndex};
 pub use pypi::{generate_pypi_simple_package_html, generate_pypi_simple_root_html, PyPiFileEntry};
 pub use raw::sanitize_raw_path;
+pub use swift::{
+    extract_swift_manifests, manifest_filename_for_swift_version, StoredSwiftRelease,
+    SwiftManifest, SwiftPackageRelease, SwiftPackageReleases, SwiftReleaseMetadata,
+    SwiftReleaseResource, SwiftReleaseSignature,
+};

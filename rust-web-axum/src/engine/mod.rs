@@ -11,6 +11,7 @@ pub mod proxy;
 pub mod proxy_cache;
 pub mod pypi;
 pub mod registry;
+pub mod swift;
 
 pub use cargo::CargoEngine;
 pub use dispatcher::RepositoryDispatcher;
@@ -25,3 +26,4 @@ pub use proxy::ProxyEngine;
 pub use proxy_cache::ProxyNegativeCache;
 pub use pypi::PyPiEngine;
 pub use registry::RepositoryRegistry;
+pub use swift::SwiftEngine;

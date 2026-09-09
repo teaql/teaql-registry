@@ -58,6 +58,8 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo }) =>
       snippet = `go get ${comp.name}@v${comp.version}`;
     } else if (fmt === 'nuget') {
       snippet = `dotnet add package ${comp.name} --version ${comp.version} --source ${window.location.origin}/repository/${comp.repository}/v3/index.json`;
+    } else if (fmt === 'swift') {
+      snippet = `.package(id: "${comp.group}.${comp.name}", exact: "${comp.version}")`;
     } else {
       snippet = `curl -O ${window.location.origin}/repository/${comp.repository}/${comp.name}`;
     }

@@ -21,22 +21,22 @@ pub struct SecurityRolePrivilege {
     id: u64,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(column = "tenant")]
     tenant_id: u64,
 
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(column = "security_role")]
     security_role_id: u64,
 
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(column = "security_privilege")]
     security_privilege_id: u64,
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
 
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(relation(
         target = "SecurityRole",
         local_key = "security_role_id",
@@ -44,7 +44,7 @@ pub struct SecurityRolePrivilege {
     ))]
     security_role: Option<Box<crate::SecurityRole>>,
 
-    // @source model.xml:218
+    // @source model.xml:219
     #[teaql(relation(
         target = "SecurityPrivilege",
         local_key = "security_privilege_id",

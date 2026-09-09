@@ -24,21 +24,21 @@ use teaql_macros::{teaql_entity, TeaqlEntity};
     data_service = "postgres"
 )]
 pub struct BlobStoreType {
-    // @source model.xml:83
+    // @source model.xml:84
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:83
+    // @source model.xml:84
     name: String,
 
-    // @source model.xml:83
+    // @source model.xml:84
     code: String,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:83
+    // @source model.xml:84
     #[teaql(column = "platform")]
     platform_id: u64,
-    // @source model.xml:83
+    // @source model.xml:84
     #[teaql(relation(target = "Platform", local_key = "platform_id", foreign_key = "id"))]
     platform: Option<Box<crate::Platform>>,
     #[teaql(dynamic)]

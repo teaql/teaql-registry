@@ -291,6 +291,20 @@ impl<'a> RepositoryConfigurationExpression<'a> {
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
+    pub fn repository_format_is_swift(self) -> crate::ValueExpression<'a, bool> {
+        let next = self.result.and_then("repository_format_id", |entity| {
+            if !entity.is_loaded("repository_format_id") {
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "repository_format_id".to_string(),
+                    attempted_path: "repository_format_id".to_string(),
+                }
+            } else {
+                teaql_core::eval::EvalResult::Value(entity.repository_format_is_swift())
+            }
+        });
+        crate::ValueExpression::new(next, self.root_desc.clone())
+    }
+
     pub fn write_policy_is_allow_write(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("write_policy_id", |entity| {
             if !entity.is_loaded("write_policy_id") {

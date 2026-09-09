@@ -34,31 +34,31 @@ pub struct BlobStoreConfiguration {
     #[teaql(id)]
     id: u64,
 
-    // @source model.xml:112
+    // @source model.xml:113
     name: String,
 
-    // @source model.xml:112
+    // @source model.xml:113
     path: String,
 
-    // @source model.xml:112
+    // @source model.xml:113
     total_size: i64,
 
-    // @source model.xml:112
+    // @source model.xml:113
     blob_count: i64,
     #[teaql(version)]
     version: i64,
-    // @source model.xml:112
+    // @source model.xml:113
     #[teaql(column = "tenant")]
     tenant_id: u64,
 
-    // @source model.xml:112
+    // @source model.xml:113
     #[teaql(column = "blob_store_type")]
     blob_store_type_id: u64,
-    // @source model.xml:112
+    // @source model.xml:113
     #[teaql(relation(target = "Tenant", local_key = "tenant_id", foreign_key = "id"))]
     tenant: Option<Box<crate::Tenant>>,
 
-    // @source model.xml:112
+    // @source model.xml:113
     #[teaql(relation(
         target = "BlobStoreType",
         local_key = "blob_store_type_id",

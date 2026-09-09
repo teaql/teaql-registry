@@ -18,6 +18,7 @@ pub mod rest_tenants;
 pub mod rest_tokens;
 pub mod rest_webhooks;
 pub mod search;
+pub mod swift_registry;
 
 pub use repository_content::AppState;
 
@@ -234,6 +235,29 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/repository/:name/gomod/*path",
             get(gomod_registry::handle_gomod_get).put(gomod_registry::handle_gomod_put),
+        )
+        // Swift Package Registry (SE-0292 / SE-0391)
+        .route(
+            "/repository/:name/swift/identifiers",
+            get(swift_registry::handle_swift_identifiers),
+        )
+        .route(
+            "/repository/:name/swift/:scope/:package/:version/Package.swift",
+            get(swift_registry::handle_swift_manifest),
+        )
+        .route(
+            "/repository/:name/swift/:scope/:package/:resource",
+            get(swift_registry::handle_swift_release_resource)
+                .put(swift_registry::handle_swift_publish)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/swift/:scope/:package",
+            get(swift_registry::handle_swift_list_releases),
+        )
+        .route(
+            "/repository/:name/swift",
+            axum::routing::options(swift_registry::handle_swift_options),
         )
         // Generic Maven & Raw repository content: /repository/:name/*path
         .route(

@@ -163,6 +163,9 @@ impl RepositoryService {
             "NUGET" => {
                 entity.update_repository_format_to_nuget();
             }
+            "SWIFT" | "SPM" => {
+                entity.update_repository_format_to_swift();
+            }
             _ => {
                 entity.update_repository_format_to_raw();
             }
