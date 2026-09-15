@@ -1,0 +1,9 @@
+[package]
+name = "teaql-registry-test-base-0916"
+version = "0.1.0"
+edition = "2021"
+description = "Disposable native Cargo registry dependency fixture"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"

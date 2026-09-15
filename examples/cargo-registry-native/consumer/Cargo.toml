@@ -1,0 +1,7 @@
+[package]
+name = "teaql-registry-native-consumer-0916"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+teaql-registry-test-child-0916 = { version = "=0.1.0", registry = "teaql" }

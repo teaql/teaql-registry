@@ -1,27 +1,40 @@
 use axum::http::{header, Method, Request, StatusCode};
 use base64::Engine;
 use bytes::Bytes;
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use sha2::Digest;
+use std::collections::HashMap;
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
-    blobstore::{BlobStore, S3BlobStore},
+    blobstore::{BlobStore, MemoryBlobStore, S3BlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
     services::{BlobStoreService, RepositoryService},
 };
-use std::collections::HashMap;
-use std::sync::Arc;
+use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
 use tower::ServiceExt;
 
 async fn setup_multiformat_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
+    setup_multiformat_test_app_with_blobstore(Arc::new(S3BlobStore::from_env("multi-blobs"))).await
+}
+
+async fn setup_cargo_test_app() -> axum::Router {
+    setup_multiformat_test_app_with_blobstore(Arc::new(MemoryBlobStore::new("cargo-test-blobs")))
+        .await
+}
+
+async fn setup_multiformat_test_app_with_blobstore(blobstore: Arc<dyn BlobStore>) -> axum::Router {
+    let config = ServiceRuntimeConfig::from_env().unwrap_or_else(|_| ServiceRuntimeConfig {
         database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
         database_user: "postgres".to_string(),
         database_password: "postgres".to_string(),
-    };
-    let runtime = Arc::new(service_runtime(config).await.expect("Runtime connect error"));
+    });
+    let runtime = Arc::new(
+        service_runtime(config)
+            .await
+            .expect("Runtime connect error"),
+    );
     runtime.ensure_schema().await.expect("Schema init error");
 
-    let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("multi-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();
@@ -81,7 +94,10 @@ async fn test_npm_registry_lifecycle() {
             description: Some("UI Library".to_string()),
             dist: NpmDist {
                 shasum: "fake-sha1".to_string(),
-                tarball: format!("http://localhost:8081/repository/npm-hosted/npm/{}/-/{}", package_name, tarball_filename),
+                tarball: format!(
+                    "http://localhost:8081/repository/npm-hosted/npm/{}/-/{}",
+                    package_name, tarball_filename
+                ),
                 integrity: None,
             },
         },
@@ -128,7 +144,9 @@ async fn test_npm_registry_lifecycle() {
         .unwrap();
     let get_doc_resp = app.clone().oneshot(get_doc_req).await.unwrap();
     assert_eq!(get_doc_resp.status(), StatusCode::OK);
-    let doc_bytes = axum::body::to_bytes(get_doc_resp.into_body(), 1024 * 1024).await.unwrap();
+    let doc_bytes = axum::body::to_bytes(get_doc_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let fetched_doc: NpmPackageDocument = serde_json::from_slice(&doc_bytes).unwrap();
     assert_eq!(fetched_doc.name, package_name);
     assert_eq!(fetched_doc.dist_tags.get("latest").unwrap(), "1.0.0");
@@ -136,12 +154,17 @@ async fn test_npm_registry_lifecycle() {
     // 3. Download tarball: GET /repository/npm-hosted/npm/:package_name/-/:tarball
     let get_tgz_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/npm-hosted/npm/{}/-/{}", package_name, tarball_filename))
+        .uri(format!(
+            "/repository/npm-hosted/npm/{}/-/{}",
+            package_name, tarball_filename
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let get_tgz_resp = app.clone().oneshot(get_tgz_req).await.unwrap();
     assert_eq!(get_tgz_resp.status(), StatusCode::OK);
-    let tgz_bytes = axum::body::to_bytes(get_tgz_resp.into_body(), 1024 * 1024).await.unwrap();
+    let tgz_bytes = axum::body::to_bytes(get_tgz_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(tgz_bytes.as_ref(), fake_tgz_data);
 }
 
@@ -167,7 +190,10 @@ async fn test_pypi_registry_lifecycle() {
     let post_req = Request::builder()
         .method(Method::POST)
         .uri("/repository/pypi-hosted/pypi/upload")
-        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={}", boundary))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
         .body(axum::body::Body::from(body_str.into_bytes()))
         .unwrap();
     let post_resp = app.clone().oneshot(post_req).await.unwrap();
@@ -181,7 +207,13 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let root_resp = app.clone().oneshot(root_req).await.unwrap();
     assert_eq!(root_resp.status(), StatusCode::OK);
-    let root_html = String::from_utf8(axum::body::to_bytes(root_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let root_html = String::from_utf8(
+        axum::body::to_bytes(root_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(root_html.contains(&format!("{}/", proj_name)));
 
     // 3. Simple Package Index: GET /repository/pypi-hosted/simple/:project/
@@ -192,7 +224,13 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let pkg_resp = app.clone().oneshot(pkg_req).await.unwrap();
     assert_eq!(pkg_resp.status(), StatusCode::OK);
-    let pkg_html = String::from_utf8(axum::body::to_bytes(pkg_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let pkg_html = String::from_utf8(
+        axum::body::to_bytes(pkg_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(pkg_html.contains(&filename));
 
     // 4. Download distribution: GET /repository/pypi-hosted/packages/:filename
@@ -203,7 +241,9 @@ async fn test_pypi_registry_lifecycle() {
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), whl_content);
 }
 
@@ -218,7 +258,10 @@ async fn test_gomod_registry_lifecycle() {
     // 1. Upload go.mod and .zip
     let put_mod_req = Request::builder()
         .method(Method::PUT)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod",
+            module
+        ))
         .body(axum::body::Body::from(Bytes::from_static(mod_content)))
         .unwrap();
     let put_mod_resp = app.clone().oneshot(put_mod_req).await.unwrap();
@@ -226,7 +269,10 @@ async fn test_gomod_registry_lifecycle() {
 
     let put_zip_req = Request::builder()
         .method(Method::PUT)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.zip", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.zip",
+            module
+        ))
         .body(axum::body::Body::from(Bytes::from_static(zip_content)))
         .unwrap();
     let put_zip_resp = app.clone().oneshot(put_zip_req).await.unwrap();
@@ -240,13 +286,22 @@ async fn test_gomod_registry_lifecycle() {
         .unwrap();
     let list_resp = app.clone().oneshot(list_req).await.unwrap();
     assert_eq!(list_resp.status(), StatusCode::OK);
-    let list_txt = String::from_utf8(axum::body::to_bytes(list_resp.into_body(), 1024 * 1024).await.unwrap().to_vec()).unwrap();
+    let list_txt = String::from_utf8(
+        axum::body::to_bytes(list_resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
     assert!(list_txt.contains("v1.0.0"));
 
     // 3. Query @v/v1.0.0.info
     let info_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.info", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.info",
+            module
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let info_resp = app.clone().oneshot(info_req).await.unwrap();
@@ -255,35 +310,60 @@ async fn test_gomod_registry_lifecycle() {
     // 4. Download @v/v1.0.0.mod & zip
     let dl_mod_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod", module))
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.mod",
+            module
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let dl_mod_resp = app.clone().oneshot(dl_mod_req).await.unwrap();
     assert_eq!(dl_mod_resp.status(), StatusCode::OK);
-    let dl_mod_bytes = axum::body::to_bytes(dl_mod_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_mod_bytes = axum::body::to_bytes(dl_mod_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_mod_bytes.as_ref(), mod_content);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_cargo_registry_lifecycle() {
-    let app = setup_multiformat_test_app().await;
+    let app = setup_cargo_test_app().await;
 
     // 1. Check config.json
     let cfg_req = Request::builder()
         .method(Method::GET)
-        .uri("/repository/cargo-hosted/config.json")
+        .uri("/repository/cargo-hosted/cargo/index/config.json")
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
         .body(axum::body::Body::empty())
         .unwrap();
     let cfg_resp = app.clone().oneshot(cfg_req).await.unwrap();
     assert_eq!(cfg_resp.status(), StatusCode::OK);
+    let cfg_body = axum::body::to_bytes(cfg_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let config: serde_json::Value = serde_json::from_slice(&cfg_body).unwrap();
+    assert_eq!(
+        config["dl"],
+        "https://registry.example.test:7443/repository/cargo-hosted/api/v1/crates/{crate}/{version}/download"
+    );
 
     // 2. Publish crate via PUT /repository/cargo-hosted/api/v1/crates/new
     let crate_name = format!("cr-{}", uuid::Uuid::new_v4().simple());
     let json_meta = serde_json::json!({
         "name": crate_name,
         "vers": "0.1.0",
-        "deps": [],
-        "features": {},
+        "deps": [{
+            "name": "serde",
+            "version_req": "^1",
+            "features": ["derive"],
+            "optional": false,
+            "default_features": true,
+            "target": null,
+            "kind": "normal",
+            "registry": "https://github.com/rust-lang/crates.io-index",
+            "explicit_name_in_toml": null
+        }],
+        "features": {"serde": ["serde/derive"]},
         "authors": ["Nexus Author"],
         "description": "Sample crate"
     });
@@ -296,6 +376,16 @@ async fn test_cargo_registry_lifecycle() {
     payload.extend_from_slice(&(crate_tarball.len() as u32).to_le_bytes());
     payload.extend_from_slice(crate_tarball);
 
+    let mut truncated_payload = payload.clone();
+    truncated_payload.pop();
+    let truncated_request = Request::builder()
+        .method(Method::PUT)
+        .uri("/repository/cargo-hosted/api/v1/crates/new")
+        .body(axum::body::Body::from(truncated_payload))
+        .unwrap();
+    let truncated_response = app.clone().oneshot(truncated_request).await.unwrap();
+    assert_eq!(truncated_response.status(), StatusCode::BAD_REQUEST);
+
     let pub_req = Request::builder()
         .method(Method::PUT)
         .uri("/repository/cargo-hosted/api/v1/crates/new")
@@ -307,21 +397,42 @@ async fn test_cargo_registry_lifecycle() {
     // 3. Check sparse index
     let idx_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/cargo-hosted/cargo/index/cr/{}", crate_name))
+        .uri(format!(
+            "/repository/cargo-hosted/cargo/index/cr/{}",
+            crate_name
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let idx_resp = app.clone().oneshot(idx_req).await.unwrap();
     assert_eq!(idx_resp.status(), StatusCode::OK);
+    let idx_body = axum::body::to_bytes(idx_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let index_record: serde_json::Value = serde_json::from_slice(&idx_body).unwrap();
+    assert_eq!(index_record["deps"][0]["name"], "serde");
+    assert_eq!(index_record["deps"][0]["req"], "^1");
+    assert_eq!(index_record["deps"][0]["features"][0], "derive");
+    assert_eq!(index_record["features"]["serde"][0], "serde/derive");
+    assert_eq!(index_record["v"], 2);
+    assert_eq!(
+        index_record["cksum"],
+        hex::encode(sha2::Sha256::digest(crate_tarball))
+    );
 
     // 4. Download crate
     let dl_req = Request::builder()
         .method(Method::GET)
-        .uri(format!("/repository/cargo-hosted/api/v1/crates/{}/0.1.0/download", crate_name))
+        .uri(format!(
+            "/repository/cargo-hosted/api/v1/crates/{}/0.1.0/download",
+            crate_name
+        ))
         .body(axum::body::Body::empty())
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), crate_tarball);
 }
 
@@ -365,6 +476,8 @@ async fn test_nuget_registry_lifecycle() {
         .unwrap();
     let dl_resp = app.clone().oneshot(dl_req).await.unwrap();
     assert_eq!(dl_resp.status(), StatusCode::OK);
-    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024).await.unwrap();
+    let dl_bytes = axum::body::to_bytes(dl_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(dl_bytes.as_ref(), fake_nupkg);
 }

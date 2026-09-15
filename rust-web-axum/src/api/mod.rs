@@ -111,6 +111,7 @@ pub fn build_app(state: AppState) -> Router {
         .nest("/v2/:name", docker_repo_router)
         // Cargo Sparse Index & Crates
         .route("/repository/:name/config.json", get(cargo_registry::handle_cargo_config))
+        .route("/repository/:name/cargo/index/config.json", get(cargo_registry::handle_cargo_config))
         .route("/repository/:name/api/v1/crates/:crate/:version/download", get(cargo_registry::handle_cargo_download))
         .route("/repository/:name/api/v1/crates/new", put(cargo_registry::handle_cargo_publish))
         .route("/repository/:name/cargo/index/*index_path", get(cargo_registry::handle_cargo_sparse_index))

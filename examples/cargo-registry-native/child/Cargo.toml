@@ -1,0 +1,12 @@
+[package]
+name = "teaql-registry-test-child-0916"
+version = "0.1.0"
+edition = "2021"
+description = "Disposable native Cargo registry transitive fixture"
+license = "MIT"
+
+[dependencies]
+teaql-registry-test-base-0916 = { version = "0.1.0", registry = "teaql" }
+
+[lib]
+path = "src/lib.rs"

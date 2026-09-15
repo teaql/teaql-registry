@@ -8,13 +8,26 @@ use axum::{
 
 use crate::api::AppState;
 use crate::engine::CargoEngine;
+use crate::format::cargo::CargoIndexRecord;
 use crate::services::RepositoryService;
 
 pub async fn handle_cargo_config(
     State(_state): State<AppState>,
     Path(repo_name): Path<String>,
+    headers: HeaderMap,
 ) -> Response {
-    let repo_url = format!("http://localhost:8081/repository/{}", repo_name);
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("localhost:8081");
+    let scheme = match headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("https") => "https",
+        _ => "http",
+    };
+    let repo_url = format!("{scheme}://{host}/repository/{repo_name}");
     let config = CargoEngine::get_config(&repo_url).await;
     Json(config).into_response()
 }
@@ -25,11 +38,25 @@ pub async fn handle_cargo_download(
 ) -> Response {
     let repo = match RepositoryService::find_by_name(&state.runtime, &repo_name).await {
         Ok(Some(r)) => r,
-        Ok(None) => return (StatusCode::NOT_FOUND, format!("Repository not found: {}", repo_name)).into_response(),
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("Repository not found: {}", repo_name),
+            )
+                .into_response()
+        }
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    match CargoEngine::get_crate_tarball(&state.runtime, &repo, &state.blobstore, &crate_name, &version).await {
+    match CargoEngine::get_crate_tarball(
+        &state.runtime,
+        &repo,
+        &state.blobstore,
+        &crate_name,
+        &version,
+    )
+    .await
+    {
         Ok(Some(data)) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -49,12 +76,20 @@ pub async fn handle_cargo_sparse_index(
 ) -> Response {
     let repo = match RepositoryService::find_by_name(&state.runtime, &repo_name).await {
         Ok(Some(r)) => r,
-        Ok(None) => return (StatusCode::NOT_FOUND, format!("Repository not found: {}", repo_name)).into_response(),
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("Repository not found: {}", repo_name),
+            )
+                .into_response()
+        }
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
     let crate_name = index_path.rsplit('/').next().unwrap_or(&index_path);
-    match CargoEngine::get_sparse_index(&state.runtime, &repo, crate_name).await {
+    match CargoEngine::get_sparse_index(&state.runtime, &repo, state.blobstore.as_ref(), crate_name)
+        .await
+    {
         Ok(Some(lines)) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -75,7 +110,13 @@ pub async fn handle_cargo_publish(
 ) -> Response {
     let repo = match RepositoryService::find_by_name(&state.runtime, &repo_name).await {
         Ok(Some(r)) => r,
-        Ok(None) => return (StatusCode::NOT_FOUND, format!("Repository not found: {}", repo_name)).into_response(),
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("Repository not found: {}", repo_name),
+            )
+                .into_response()
+        }
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
@@ -90,22 +131,55 @@ pub async fn handle_cargo_publish(
 
     let json_len = u32::from_le_bytes([body[0], body[1], body[2], body[3]]) as usize;
     if body.len() < 4 + json_len + 4 {
-        return (StatusCode::BAD_REQUEST, "Payload too short for json metadata").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Payload too short for json metadata",
+        )
+            .into_response();
     }
 
     let json_bytes = &body[4..4 + json_len];
     let meta: serde_json::Value = match serde_json::from_slice(json_bytes) {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid json metadata: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid json metadata: {}", e),
+            )
+                .into_response()
+        }
     };
 
-    let name = meta.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+    if let Err(error) = CargoIndexRecord::from_publish_metadata(&meta, String::new()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid Cargo publish index metadata: {error}"),
+        )
+            .into_response();
+    }
+
+    let name = meta
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let vers = meta.get("vers").and_then(|v| v.as_str()).unwrap_or("1.0.0");
 
     let crate_offset = 4 + json_len + 4;
+    let declared_crate_len = u32::from_le_bytes(
+        body[4 + json_len..crate_offset]
+            .try_into()
+            .expect("validated Cargo publish payload length"),
+    ) as usize;
+    if body.len() != crate_offset + declared_crate_len {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Cargo publish archive length does not match payload",
+        )
+            .into_response();
+    }
     let crate_bytes = &body[crate_offset..];
 
-    match CargoEngine::upload_crate(&state.runtime, &repo, &state.blobstore, name, vers, crate_bytes).await {
+    match CargoEngine::upload_crate(&state.runtime, &repo, &state.blobstore, name, vers, &meta, crate_bytes).await {
         Ok(_) => Json(serde_json::json!({"warnings": {"invalid_categories": [], "invalid_badges": [], "other": []}})).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
