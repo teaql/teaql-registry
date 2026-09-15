@@ -23,6 +23,7 @@ cp -R "$repo_dir/examples/cargo-registry-native/base/." "$gate_dir/base/"
 cp -R "$repo_dir/examples/cargo-registry-native/child/." "$gate_dir/child/"
 cp -R "$repo_dir/examples/cargo-registry-native/consumer/." "$gate_dir/consumer/"
 export CARGO_REGISTRIES_TEAQL_INDEX="$index"
+export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="${CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS:-cargo:token}"
 export CARGO_TARGET_DIR="$gate_dir/target"
 export CARGO_HOME="$gate_dir/publish-home"
 
@@ -30,7 +31,8 @@ cargo publish --registry teaql --manifest-path "$gate_dir/base/Cargo.toml"
 cargo publish --registry teaql --manifest-path "$gate_dir/child/Cargo.toml"
 
 child_index="${index#sparse+}te/aq/teaql-registry-test-child-0916"
-index_entry="$(curl --fail --silent --show-error "$child_index")"
+index_entry="$(curl --fail --silent --show-error \
+  --header "Authorization: Bearer ${CARGO_REGISTRIES_TEAQL_TOKEN}" "$child_index")"
 if ! grep -Fq '"name":"teaql-registry-test-base-0916"' <<<"$index_entry" \
     || ! grep -Fq '"name":"serde"' <<<"$index_entry"; then
   echo 'FAIL: published child sparse index omitted its local or crates.io dependency' >&2
