@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 teaql-registry-test-base-0916 = { version = "0.1.0", registry = "teaql" }
+serde = { version = "1", features = ["derive"] }
 
 [lib]
 path = "src/lib.rs"

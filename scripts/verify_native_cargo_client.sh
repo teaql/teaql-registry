@@ -29,6 +29,14 @@ export CARGO_HOME="$gate_dir/publish-home"
 cargo publish --registry teaql --manifest-path "$gate_dir/base/Cargo.toml"
 cargo publish --registry teaql --manifest-path "$gate_dir/child/Cargo.toml"
 
+child_index="${index#sparse+}te/aq/teaql-registry-test-child-0916"
+index_entry="$(curl --fail --silent --show-error "$child_index")"
+if ! grep -Fq '"name":"teaql-registry-test-base-0916"' <<<"$index_entry" \
+    || ! grep -Fq '"name":"serde"' <<<"$index_entry"; then
+  echo 'FAIL: published child sparse index omitted its local or crates.io dependency' >&2
+  exit 1
+fi
+
 export CARGO_HOME="$gate_dir/consumer-home"
 export CARGO_TARGET_DIR="$gate_dir/consumer-target"
 cargo run --manifest-path "$gate_dir/consumer/Cargo.toml"
@@ -39,4 +47,4 @@ if [[ "$(grep -Fc "source = \"$index\"" "$lock")" != "2" ]]; then
   echo 'FAIL: consumer Cargo.lock does not retain two packages from the specified index' >&2
   exit 1
 fi
-echo 'PASS native Cargo transitive dependency gate (fresh consumer and offline locked replay)'
+echo 'PASS native Cargo local/external dependency gate (index, fresh consumer, offline locked replay)'
