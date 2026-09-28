@@ -7,8 +7,12 @@ use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
 use teaql_registry::services::{AssetService, BlobStoreGcService, BlobStoreService};
 use teaql_registry_core::service_runtime;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_blobstore_garbage_collection() {
+#[test]
+fn test_blobstore_garbage_collection() {
+    common::run_with_large_stack(test_blobstore_garbage_collection_body);
+}
+
+async fn test_blobstore_garbage_collection_body() {
     let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime error"));
     runtime.ensure_schema().await.expect("Schema error");

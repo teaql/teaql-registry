@@ -64,7 +64,9 @@ pub fn validate_package_identity(scope: &str, name: &str) -> Result<()> {
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
     };
     if !valid(scope) || !valid(name) {
-        bail!("invalid Swift package identity; scope and name must contain only ASCII letters, digits, '-' or '_'");
+        bail!(
+            "invalid Swift package identity; scope and name must contain only ASCII letters, digits, '-' or '_'"
+        );
     }
     Ok(())
 }
@@ -81,13 +83,31 @@ pub fn extract_swift_manifests(source_archive: &[u8]) -> Result<Vec<SwiftManifes
     let mut manifests = Vec::new();
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let Some(filename) = entry.name().rsplit('/').next().map(str::to_string) else {
-            continue;
+        let path = entry.name();
+        let filename = match path.split_once('/') {
+            Some((root, relative)) if !root.is_empty() && root != "." && root != ".." => {
+                if relative.contains('/') {
+                    continue;
+                }
+                relative
+            }
+            Some(_) => continue,
+            None => path,
         };
+        if filename.is_empty() {
+            continue;
+        }
+        let filename = filename.to_string();
         if filename != "Package.swift"
             && !(filename.starts_with("Package@swift-") && filename.ends_with(".swift"))
         {
             continue;
+        }
+        if manifests
+            .iter()
+            .any(|item: &SwiftManifest| item.filename == filename)
+        {
+            bail!("package contains duplicate root manifest {filename}");
         }
         let mut contents = Vec::new();
         entry.read_to_end(&mut contents)?;
@@ -143,6 +163,15 @@ mod tests {
         writer
             .write_all(b"// swift-tools-version:5.8\nimport PackageDescription\n")
             .unwrap();
+        writer
+            .start_file(
+                "teaql.Probe/Examples/SchoolManagement/Package.swift",
+                SimpleFileOptions::default(),
+            )
+            .unwrap();
+        writer
+            .write_all(b"// swift-tools-version: 6.0\n// nested package must be ignored\n")
+            .unwrap();
         writer.finish().unwrap().into_inner()
     }
 
@@ -152,7 +181,27 @@ mod tests {
         assert_eq!(manifests.len(), 2);
         assert_eq!(manifests[0].filename, "Package.swift");
         assert_eq!(manifests[0].tools_version.as_deref(), Some("5.9"));
+        assert!(!String::from_utf8_lossy(&manifests[0].contents).contains("nested package"));
         assert_eq!(manifests[1].tools_version.as_deref(), Some("5.8"));
+    }
+
+    #[test]
+    fn rejects_duplicate_root_manifest() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for root in ["teaql.Probe", "other"] {
+            writer
+                .start_file(
+                    format!("{root}/Package.swift"),
+                    SimpleFileOptions::default(),
+                )
+                .unwrap();
+            writer.write_all(b"// swift-tools-version: 6.0\n").unwrap();
+        }
+        let bytes = writer.finish().unwrap().into_inner();
+        assert!(extract_swift_manifests(&bytes)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate root manifest"));
     }
 
     #[test]

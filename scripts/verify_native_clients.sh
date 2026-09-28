@@ -103,13 +103,62 @@ Credentials are intentionally represented as `<redacted>`.
 - Maven: `mvn deploy:deploy-file`, then `mvn dependency:get`.
 - npm: `npm publish`, then `npm install` in a clean consumer directory.
 - PyPI: `twine upload`, then `pip install` in a clean target directory.
-- Cargo: `cargo publish --registry teaql`, then `cargo fetch` from the sparse registry.
+- Cargo: `cargo publish --registry teaql`, assert sparse-index dependencies, then `cargo check` using the downloaded crate.
 - Go modules: fixture publication followed by `go mod download` through `GOPROXY` (Go has no native publish operation).
 - NuGet: `dotnet nuget push`, then `dotnet restore` from the v3 service index.
 - Swift: `swift package-registry publish`, then registry-backed `swift package resolve` and `swift build`.
 - Docker: `docker push`, local image removal, then `docker pull`.
 - Raw: authenticated HTTP PUT and GET with SHA-256 comparison (there is no ecosystem package manager).
 EOF
+
+# Cargo runs first so a broken published dependency index cannot hide behind
+# an unrelated Maven/PyPI/Go client environment failure.
+CARGO_PACKAGE="teaql-native-probe-${RUN_ID}"
+mkdir -p "${WORK_DIR}/cargo/package/src" "${WORK_DIR}/cargo/consumer/src"
+cat >"${WORK_DIR}/cargo/package/Cargo.toml" <<EOF
+[package]
+name = "${CARGO_PACKAGE}"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "TeaQL Registry native client probe"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+EOF
+printf 'use serde::Serialize;\n#[derive(Serialize)]\npub struct DependencyProbe { pub value: String }\npub fn probe() -> &\x27static str { "%s" }\n' "${RUN_ID}" >"${WORK_DIR}/cargo/package/src/lib.rs"
+cat >"${WORK_DIR}/cargo/config.toml" <<EOF
+[registries.teaql]
+index = "sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/"
+credential-provider = "cargo:token"
+EOF
+mkdir -p "${WORK_DIR}/cargo/home"
+cp "${WORK_DIR}/cargo/config.toml" "${WORK_DIR}/cargo/home/config.toml"
+run_step cargo-publish env CARGO_HOME="${WORK_DIR}/cargo/home" \
+  CARGO_REGISTRIES_TEAQL_INDEX="sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/" \
+  CARGO_REGISTRIES_TEAQL_TOKEN="Bearer ${PAT}" cargo publish \
+  --manifest-path "${WORK_DIR}/cargo/package/Cargo.toml" --registry teaql --allow-dirty
+INDEX_METADATA="$(curl -fsS --user "admin:${ADMIN_PASSWORD_VALUE}" \
+  "${REGISTRY_URL}/repository/cargo-hosted/cargo/index/te/aq/${CARGO_PACKAGE}")"
+if ! jq -e 'any(.deps[]; .name == "serde" and .kind == "normal")' \
+  <<<"${INDEX_METADATA}" >/dev/null; then
+  echo "error: Cargo sparse index lost the published serde dependency" >&2
+  exit 1
+fi
+cat >"${WORK_DIR}/cargo/consumer/Cargo.toml" <<EOF
+[package]
+name = "teaql-native-consumer-${RUN_ID}"
+version = "0.0.1"
+edition = "2021"
+[dependencies]
+${CARGO_PACKAGE} = { version = "=0.0.1", registry = "teaql" }
+EOF
+printf 'fn main() { let _ = %s::probe(); }\n' "${CARGO_PACKAGE//-/_}" >"${WORK_DIR}/cargo/consumer/src/main.rs"
+run_step cargo-consume env CARGO_HOME="${WORK_DIR}/cargo/home" \
+  CARGO_REGISTRIES_TEAQL_INDEX="sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/" \
+  CARGO_REGISTRIES_TEAQL_TOKEN="Bearer ${PAT}" cargo check \
+  --manifest-path "${WORK_DIR}/cargo/consumer/Cargo.toml"
+printf 'Cargo\tPASS\tPASS\n' >>"${SUMMARY}"
 
 # Maven
 MAVEN_ARTIFACT="native-probe-${RUN_ID}"
@@ -162,7 +211,7 @@ version = "0.0.1"
 EOF
 printf '__version__ = "0.0.1"\n' >"${WORK_DIR}/python/src/${PYPI_PACKAGE}/__init__.py"
 run_step pypi-build python3 -m build --wheel --no-isolation "${WORK_DIR}/python"
-if command -v twine >/dev/null 2>&1; then
+if command -v twine >/dev/null 2>&1 && python3 -c 'from twine.commands import upload' >/dev/null 2>&1; then
   TWINE=(twine)
 else
   python3 -m venv "${WORK_DIR}/twine-venv"
@@ -181,44 +230,6 @@ run_step pypi-consume env PIP_CONFIG_FILE="${WORK_DIR}/python/pip.conf" python3 
   --no-deps --target "${WORK_DIR}/python/consumer" "${PYPI_PACKAGE}==0.0.1"
 test -f "${WORK_DIR}/python/consumer/${PYPI_PACKAGE}/__init__.py"
 printf 'PyPI\tPASS\tPASS\n' >>"${SUMMARY}"
-
-# Cargo
-CARGO_PACKAGE="teaql-native-probe-${RUN_ID}"
-mkdir -p "${WORK_DIR}/cargo/package/src" "${WORK_DIR}/cargo/consumer/src"
-cat >"${WORK_DIR}/cargo/package/Cargo.toml" <<EOF
-[package]
-name = "${CARGO_PACKAGE}"
-version = "0.0.1"
-edition = "2021"
-license = "MIT"
-description = "TeaQL Registry native client probe"
-EOF
-printf 'pub fn probe() -> &\x27static str { "%s" }\n' "${RUN_ID}" >"${WORK_DIR}/cargo/package/src/lib.rs"
-cat >"${WORK_DIR}/cargo/config.toml" <<EOF
-[registries.teaql]
-index = "sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/"
-credential-provider = "cargo:token"
-EOF
-mkdir -p "${WORK_DIR}/cargo/home"
-cp "${WORK_DIR}/cargo/config.toml" "${WORK_DIR}/cargo/home/config.toml"
-run_step cargo-publish env CARGO_HOME="${WORK_DIR}/cargo/home" \
-  CARGO_REGISTRIES_TEAQL_INDEX="sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/" \
-  CARGO_REGISTRIES_TEAQL_TOKEN="Bearer ${PAT}" cargo publish \
-  --manifest-path "${WORK_DIR}/cargo/package/Cargo.toml" --registry teaql --allow-dirty
-cat >"${WORK_DIR}/cargo/consumer/Cargo.toml" <<EOF
-[package]
-name = "teaql-native-consumer-${RUN_ID}"
-version = "0.0.1"
-edition = "2021"
-[dependencies]
-${CARGO_PACKAGE} = { version = "=0.0.1", registry = "teaql" }
-EOF
-printf 'fn main() {}\n' >"${WORK_DIR}/cargo/consumer/src/main.rs"
-run_step cargo-consume env CARGO_HOME="${WORK_DIR}/cargo/home" \
-  CARGO_REGISTRIES_TEAQL_INDEX="sparse+${REGISTRY_URL}/repository/cargo-hosted/cargo/index/" \
-  CARGO_REGISTRIES_TEAQL_TOKEN="Bearer ${PAT}" cargo fetch \
-  --manifest-path "${WORK_DIR}/cargo/consumer/Cargo.toml"
-printf 'Cargo\tPASS\tPASS\n' >>"${SUMMARY}"
 
 # Go modules (native consumption; GOPROXY defines no publication operation)
 GO_MODULE="example.com/teaql/nativeprobe${RUN_ID}"

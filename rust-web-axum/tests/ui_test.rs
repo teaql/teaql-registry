@@ -10,8 +10,12 @@ use teaql_registry::api::{build_app, AppState};
 use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
 use teaql_registry_core::service_runtime;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_embedded_ui_console() {
+#[test]
+fn test_embedded_ui_console() {
+    common::run_with_large_stack(test_embedded_ui_console_body);
+}
+
+async fn test_embedded_ui_console_body() {
     let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime error"));
     runtime.ensure_schema().await.expect("Schema error");

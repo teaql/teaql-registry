@@ -119,8 +119,12 @@ let package = Package(
     writer.finish().unwrap().into_inner()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_swift_package_registry_lifecycle() {
+#[test]
+fn test_swift_package_registry_lifecycle() {
+    common::run_with_large_stack(swift_package_registry_lifecycle_body);
+}
+
+async fn swift_package_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
     let package = format!("probe{}", uuid::Uuid::new_v4().simple());
     let package_id = format!("teaql.{package}");
@@ -247,8 +251,12 @@ async fn test_swift_package_registry_lifecycle() {
     assert_eq!(identifiers_json["identifiers"][0], package_id);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_npm_registry_lifecycle() {
+#[test]
+fn test_npm_registry_lifecycle() {
+    common::run_with_large_stack(npm_registry_lifecycle_body);
+}
+
+async fn npm_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
 
     let package_name = format!("my-ui-lib-{}", uuid::Uuid::new_v4().simple());
@@ -348,8 +356,102 @@ async fn test_npm_registry_lifecycle() {
     assert_eq!(tgz_bytes.as_ref(), fake_tgz_data);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pypi_registry_lifecycle() {
+#[test]
+fn test_scoped_npm_registry_lifecycle() {
+    common::run_with_large_stack(scoped_npm_registry_lifecycle_body);
+}
+
+async fn scoped_npm_registry_lifecycle_body() {
+    let app = setup_multiformat_test_app().await;
+    let name = format!("scoped-{}", uuid::Uuid::new_v4().simple());
+    let package_name = format!("@teaql/{name}");
+    let encoded_name = package_name.replace('/', "%2F");
+    let attachment_name = format!("@teaql/{name}-1.0.0.tgz");
+    let canonical_filename = format!("{name}-1.0.0.tgz");
+    let archive = b"scoped-npm-tarball";
+    let mut versions = HashMap::new();
+    versions.insert(
+        "1.0.0".to_string(),
+        NpmVersionDetail {
+            name: package_name.clone(),
+            version: "1.0.0".to_string(),
+            description: None,
+            dist: NpmDist {
+                shasum: String::new(),
+                tarball: format!(
+                    "http://localhost:8081/repository/npm-hosted/npm/{encoded_name}/-/{canonical_filename}"
+                ),
+                integrity: None,
+            },
+        },
+    );
+    let mut attachments = HashMap::new();
+    attachments.insert(
+        attachment_name,
+        NpmAttachment {
+            content_type: Some("application/gzip".to_string()),
+            data: base64::engine::general_purpose::STANDARD.encode(archive),
+            length: Some(archive.len()),
+        },
+    );
+    let document = NpmPackageDocument {
+        id: package_name.clone(),
+        name: package_name.clone(),
+        description: None,
+        dist_tags: HashMap::from([("latest".to_string(), "1.0.0".to_string())]),
+        versions,
+        attachments,
+    };
+    let publish = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/repository/npm-hosted/npm/{encoded_name}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&document).unwrap(),
+        ))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(publish).await.unwrap().status(),
+        StatusCode::CREATED
+    );
+
+    let metadata = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/repository/npm-hosted/npm/{encoded_name}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(metadata).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let returned: NpmPackageDocument = serde_json::from_slice(&bytes).unwrap();
+    assert!(returned.versions["1.0.0"]
+        .dist
+        .tarball
+        .ends_with(&format!("/{encoded_name}/-/{canonical_filename}")));
+
+    let download = Request::builder()
+        .method(Method::GET)
+        .uri(format!(
+            "/repository/npm-hosted/npm/{encoded_name}/-/{canonical_filename}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), archive);
+}
+
+#[test]
+fn test_pypi_registry_lifecycle() {
+    common::run_with_large_stack(pypi_registry_lifecycle_body);
+}
+
+async fn pypi_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
 
     let proj_name = format!("flask-util-{}", uuid::Uuid::new_v4().simple());
@@ -431,8 +533,12 @@ async fn test_pypi_registry_lifecycle() {
     assert_eq!(dl_bytes.as_ref(), whl_content.as_slice());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_gomod_registry_lifecycle() {
+#[test]
+fn test_gomod_registry_lifecycle() {
+    common::run_with_large_stack(gomod_registry_lifecycle_body);
+}
+
+async fn gomod_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
 
     let module = format!("github.com/example/lib-{}", uuid::Uuid::new_v4().simple());
@@ -508,8 +614,12 @@ async fn test_gomod_registry_lifecycle() {
     assert_eq!(dl_mod_bytes.as_ref(), mod_content);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_cargo_registry_lifecycle() {
+#[test]
+fn test_cargo_registry_lifecycle() {
+    common::run_with_large_stack(cargo_registry_lifecycle_body);
+}
+
+async fn cargo_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
 
     // 1. Check config.json
@@ -537,8 +647,18 @@ async fn test_cargo_registry_lifecycle() {
     let json_meta = serde_json::json!({
         "name": crate_name,
         "vers": "0.1.0",
-        "deps": [],
-        "features": {},
+        "deps": [{
+            "name": "serde",
+            "version_req": "^1",
+            "features": ["derive"],
+            "optional": false,
+            "default_features": true,
+            "target": null,
+            "kind": "normal",
+            "registry": "https://github.com/rust-lang/crates.io-index",
+            "explicit_name_in_toml": null
+        }],
+        "features": {"serde": ["serde/derive"]},
         "authors": ["Nexus Author"],
         "description": "Sample crate"
     });
@@ -578,6 +698,11 @@ async fn test_cargo_registry_lifecycle() {
         index_record["cksum"],
         hex::encode(sha2::Sha256::digest(crate_tarball))
     );
+    assert_eq!(index_record["deps"][0]["name"], "serde");
+    assert_eq!(index_record["deps"][0]["req"], "^1");
+    assert_eq!(index_record["deps"][0]["features"][0], "derive");
+    assert_eq!(index_record["features"]["serde"][0], "serde/derive");
+    assert_eq!(index_record["v"], 2);
 
     // 4. Download crate
     let dl_req = Request::builder()
@@ -596,8 +721,12 @@ async fn test_cargo_registry_lifecycle() {
     assert_eq!(dl_bytes.as_ref(), crate_tarball);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_nuget_registry_lifecycle() {
+#[test]
+fn test_nuget_registry_lifecycle() {
+    common::run_with_large_stack(nuget_registry_lifecycle_body);
+}
+
+async fn nuget_registry_lifecycle_body() {
     let app = setup_multiformat_test_app().await;
 
     // 1. Service Index: GET /repository/nuget-hosted/v3/index.json
@@ -658,8 +787,12 @@ async fn test_nuget_registry_lifecycle() {
     assert_eq!(dl_bytes.as_ref(), fake_nupkg);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_nuget_native_multipart_upload_strips_envelope() {
+#[test]
+fn test_nuget_native_multipart_upload_strips_envelope() {
+    common::run_with_large_stack(nuget_native_multipart_upload_strips_envelope_body);
+}
+
+async fn nuget_native_multipart_upload_strips_envelope_body() {
     use std::io::{Cursor, Write};
     use zip::{write::SimpleFileOptions, ZipWriter};
 

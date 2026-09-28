@@ -412,8 +412,19 @@ async fn ensure_application_indexes(pool: &deadpool_postgres::Pool) -> anyhow::R
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+const REGISTRY_WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The generated TeaQL runtime builds large schema/mutation futures. A
+    // Cargo publication previously overflowed Tokio's default worker stack.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(REGISTRY_WORKER_STACK_BYTES)
+        .build()?;
+    runtime.block_on(run_registry())
+}
+
+async fn run_registry() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

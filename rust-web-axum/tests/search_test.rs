@@ -21,8 +21,12 @@ async fn setup_search_test_app() -> axum::Router {
     build_app(AppState::new(runtime, blobstore))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_search_components_and_assets() {
+#[test]
+fn test_search_components_and_assets() {
+    common::run_with_large_stack(test_search_components_and_assets_body);
+}
+
+async fn test_search_components_and_assets_body() {
     let app = setup_search_test_app().await;
 
     // 1. Search components with keyword

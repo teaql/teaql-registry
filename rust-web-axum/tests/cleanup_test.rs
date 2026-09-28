@@ -6,15 +6,34 @@ use std::sync::Arc;
 use teaql_registry::blobstore::{BlobStore, MemoryBlobStore};
 use teaql_registry::services::{
     AssetService, BlobStoreService, CleanupPolicy, CleanupService, ComponentService,
-    RepositoryService,
+    RepositoryService, TenantService,
 };
 use teaql_registry_core::service_runtime;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_retention_and_cleanup_policy() {
+#[test]
+fn test_retention_and_cleanup_policy() {
+    common::run_with_large_stack(retention_and_cleanup_policy_body);
+}
+
+async fn retention_and_cleanup_policy_body() {
     let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("Runtime error"));
     runtime.ensure_schema().await.expect("Schema error");
+    if TenantService::find_tenant_by_code(&runtime, "default")
+        .await
+        .expect("Default tenant lookup")
+        .is_none()
+    {
+        TenantService::create_tenant_with_platform(
+            &runtime,
+            1,
+            "Default Tenant",
+            "default",
+            "Cleanup test tenant",
+        )
+        .await
+        .expect("Default tenant seed");
+    }
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("cleanup-store"));
     blobstore.init().await.expect("Blobstore init error");

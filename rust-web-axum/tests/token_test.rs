@@ -38,8 +38,12 @@ async fn test_context_and_user() -> (ServiceRuntime, SecurityUser, u64) {
     (context, user, tenant_id)
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_personal_access_token_lifecycle() {
+#[test]
+fn test_personal_access_token_lifecycle() {
+    common::run_with_large_stack(test_personal_access_token_lifecycle_body);
+}
+
+async fn test_personal_access_token_lifecycle_body() {
     let (context, user, tenant_id) = test_context_and_user().await;
     let username = user.username();
     let (secret, token) = TokenService::create_token(
@@ -106,8 +110,14 @@ async fn test_personal_access_token_lifecycle() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn zero_day_token_means_no_expiration_and_survives_a_new_runtime() {
+#[test]
+fn zero_day_token_means_no_expiration_and_survives_a_new_runtime() {
+    common::run_with_large_stack(
+        zero_day_token_means_no_expiration_and_survives_a_new_runtime_body,
+    );
+}
+
+async fn zero_day_token_means_no_expiration_and_survives_a_new_runtime_body() {
     let (context, user, tenant_id) = test_context_and_user().await;
     let username = user.username();
     let (_secret, token) = TokenService::create_token(

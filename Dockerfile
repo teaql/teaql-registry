@@ -30,11 +30,15 @@ COPY models ./models
 RUN touch rust-lib-core/lib/src/lib.rs rust-web-axum/src/main.rs && \
     cargo build --release --bin teaql-registry
 
+# Upload handlers stream multipart bodies to temp files. Scratch has no /tmp.
+RUN mkdir -m 1777 /app/runtime-tmp
+
 # Stage 2: Ultra-minimal Scratch Runtime
 FROM scratch
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/target/release/teaql-registry /teaql-registry
+COPY --from=builder /app/runtime-tmp /tmp
 
 EXPOSE 8081
 

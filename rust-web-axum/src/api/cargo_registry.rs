@@ -159,7 +159,7 @@ pub async fn handle_cargo_download(
 }
 
 pub async fn handle_cargo_sparse_index(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     axum::extract::Extension(request): axum::extract::Extension<
         std::sync::Arc<crate::security::RequestContext>,
     >,
@@ -178,7 +178,14 @@ pub async fn handle_cargo_sparse_index(
     };
 
     let crate_name = index_path.rsplit('/').next().unwrap_or(&index_path);
-    match CargoEngine::get_sparse_index(&request.runtime, &repo, crate_name).await {
+    match CargoEngine::get_sparse_index(
+        &request.runtime,
+        &repo,
+        state.blobstore.as_ref(),
+        crate_name,
+    )
+    .await
+    {
         Ok(Some(lines)) => {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -325,6 +332,15 @@ pub async fn handle_cargo_publish(
             return (StatusCode::BAD_REQUEST, err_msg).into_response();
         }
     };
+    if let Err(error) =
+        crate::format::cargo::CargoIndexRecord::from_publish_metadata(&meta, String::new())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid Cargo publish index metadata: {error}"),
+        )
+            .into_response();
+    }
 
     let name = meta
         .get("name")
@@ -333,7 +349,19 @@ pub async fn handle_cargo_publish(
     let vers = meta.get("vers").and_then(|v| v.as_str()).unwrap_or("1.0.0");
     let path = format!("{}/{}", name, vers);
 
+    let declared_crate_len = u32::from_le_bytes(
+        body[4 + json_len..4 + json_len + 4]
+            .try_into()
+            .expect("validated Cargo publish payload length"),
+    ) as usize;
     let crate_offset = 4 + json_len + 4;
+    if body.len() != crate_offset + declared_crate_len {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Cargo publish archive length does not match payload",
+        )
+            .into_response();
+    }
     let crate_bytes = &body[crate_offset..];
     let crate_size = crate_bytes.len() as i64;
 
@@ -343,6 +371,7 @@ pub async fn handle_cargo_publish(
         &state.blobstore,
         name,
         vers,
+        &meta,
         crate_bytes,
     )
     .await

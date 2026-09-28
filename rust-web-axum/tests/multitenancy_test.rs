@@ -39,8 +39,12 @@ async fn setup_tenant_test_app() -> axum::Router {
     ))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_tenant_creation_and_provisioning_lifecycle() {
+#[test]
+fn test_tenant_creation_and_provisioning_lifecycle() {
+    common::run_with_large_stack(test_tenant_creation_and_provisioning_lifecycle_body);
+}
+
+async fn test_tenant_creation_and_provisioning_lifecycle_body() {
     let app = setup_tenant_test_app().await;
 
     let unique_suffix = uuid::Uuid::new_v4().simple().to_string();
@@ -105,8 +109,12 @@ async fn test_tenant_creation_and_provisioning_lifecycle() {
         .any(|t| t["id"] == tenant_id_str));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_user_context_tenant_isolation() {
+#[test]
+fn test_user_context_tenant_isolation() {
+    common::run_with_large_stack(test_user_context_tenant_isolation_body);
+}
+
+async fn test_user_context_tenant_isolation_body() {
     let config = common::runtime_config();
     let base_runtime = service_runtime(config.clone())
         .await

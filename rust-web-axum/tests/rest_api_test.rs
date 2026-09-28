@@ -65,8 +65,12 @@ async fn setup_rest_test_app() -> axum::Router {
     build_app(AppState::new(runtime, blobstore))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_status_endpoints() {
+#[test]
+fn test_rest_status_endpoints() {
+    common::run_with_large_stack(test_rest_status_endpoints_body);
+}
+
+async fn test_rest_status_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     let req = Request::builder()
@@ -84,8 +88,12 @@ async fn test_rest_status_endpoints() {
     assert_eq!(resp_writable.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_repositories_endpoints() {
+#[test]
+fn test_rest_repositories_endpoints() {
+    common::run_with_large_stack(test_rest_repositories_endpoints_body);
+}
+
+async fn test_rest_repositories_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // 1. List repositories
@@ -126,8 +134,12 @@ async fn test_rest_repositories_endpoints() {
     assert_eq!(create_resp.status(), StatusCode::CREATED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_blobstores_endpoints() {
+#[test]
+fn test_rest_blobstores_endpoints() {
+    common::run_with_large_stack(test_rest_blobstores_endpoints_body);
+}
+
+async fn test_rest_blobstores_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // List blobstores
@@ -154,8 +166,12 @@ async fn test_rest_blobstores_endpoints() {
     assert_eq!(create_resp.status(), StatusCode::CREATED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_security_endpoints() {
+#[test]
+fn test_rest_security_endpoints() {
+    common::run_with_large_stack(test_rest_security_endpoints_body);
+}
+
+async fn test_rest_security_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // 1. List users
@@ -224,8 +240,12 @@ async fn test_rest_security_endpoints() {
     assert_eq!(anon_put_resp.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_components_and_assets() {
+#[test]
+fn test_rest_components_and_assets() {
+    common::run_with_large_stack(test_rest_components_and_assets_body);
+}
+
+async fn test_rest_components_and_assets_body() {
     let app = setup_rest_test_app().await;
 
     // Components for maven-releases

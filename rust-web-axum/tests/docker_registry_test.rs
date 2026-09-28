@@ -58,8 +58,12 @@ async fn setup_docker_test_app() -> axum::Router {
     build_app(AppState::new(runtime, blobstore))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_docker_v2_ping() {
+#[test]
+fn test_docker_v2_ping() {
+    common::run_with_large_stack(test_docker_v2_ping_body);
+}
+
+async fn test_docker_v2_ping_body() {
     let app = setup_docker_test_app().await;
 
     let req = Request::builder()
@@ -77,8 +81,12 @@ async fn test_docker_v2_ping() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_docker_blob_and_manifest_lifecycle() {
+#[test]
+fn test_docker_blob_and_manifest_lifecycle() {
+    common::run_with_large_stack(test_docker_blob_and_manifest_lifecycle_body);
+}
+
+async fn test_docker_blob_and_manifest_lifecycle_body() {
     let app = setup_docker_test_app().await;
     let image_name = format!("testapp-{}", uuid::Uuid::new_v4().simple());
 

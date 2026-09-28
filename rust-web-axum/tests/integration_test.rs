@@ -102,8 +102,12 @@ async fn setup_test_app() -> axum::Router {
     build_app(app_state)
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_debug_component_query() {
+#[test]
+fn test_debug_component_query() {
+    common::run_with_large_stack(test_debug_component_query_body);
+}
+
+async fn test_debug_component_query_body() {
     let config = common::runtime_config();
     let runtime = service_runtime(config).await.unwrap();
     runtime.ensure_schema().await.unwrap();
@@ -113,8 +117,12 @@ async fn test_debug_component_query() {
     assert!(res.is_ok());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_status_endpoints() {
+#[test]
+fn test_rest_status_endpoints() {
+    common::run_with_large_stack(test_rest_status_endpoints_body);
+}
+
+async fn test_rest_status_endpoints_body() {
     let app = setup_test_app().await;
 
     // Test /service/rest/v1/status
@@ -134,8 +142,12 @@ async fn test_rest_status_endpoints() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_repositories_and_security() {
+#[test]
+fn test_rest_repositories_and_security() {
+    common::run_with_large_stack(test_rest_repositories_and_security_body);
+}
+
+async fn test_rest_repositories_and_security_body() {
     let app = setup_test_app().await;
 
     // List repositories
@@ -171,8 +183,12 @@ async fn test_rest_repositories_and_security() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_artifact_upload_download_and_group_routing() {
+#[test]
+fn test_artifact_upload_download_and_group_routing() {
+    common::run_with_large_stack(test_artifact_upload_download_and_group_routing_body);
+}
+
+async fn test_artifact_upload_download_and_group_routing_body() {
     let app = setup_test_app().await;
 
     let jar_data = b"PK\x03\x04fake-jar-binary-content-1.0.0";

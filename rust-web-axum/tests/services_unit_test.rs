@@ -14,8 +14,12 @@ async fn get_test_runtime() -> teaql_registry_core::ServiceRuntime {
     runtime
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_blob_store_service() {
+#[test]
+fn test_blob_store_service() {
+    common::run_with_large_stack(test_blob_store_service_body);
+}
+
+async fn test_blob_store_service_body() {
     let runtime = get_test_runtime().await;
 
     let unique_name = format!("bs-{}", uuid::Uuid::new_v4().simple());
@@ -36,8 +40,12 @@ async fn test_blob_store_service() {
     assert!(all.iter().any(|b| b.name() == unique_name));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_repository_service() {
+#[test]
+fn test_repository_service() {
+    common::run_with_large_stack(test_repository_service_body);
+}
+
+async fn test_repository_service_body() {
     let runtime = get_test_runtime().await;
 
     let bs = BlobStoreService::create(
@@ -80,8 +88,12 @@ async fn test_repository_service() {
     assert_eq!(cr.unwrap().format_name(), "MAVEN2");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_security_service() {
+#[test]
+fn test_security_service() {
+    common::run_with_large_stack(test_security_service_body);
+}
+
+async fn test_security_service_body() {
     let runtime = get_test_runtime().await;
 
     let username = format!("user-{}", uuid::Uuid::new_v4().simple());
@@ -139,8 +151,12 @@ async fn test_security_service() {
     assert!(privs.iter().any(|p| p.privilege_id() == unique_priv_id));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_component_and_asset_service() {
+#[test]
+fn test_component_and_asset_service() {
+    common::run_with_large_stack(test_component_and_asset_service_body);
+}
+
+async fn test_component_and_asset_service_body() {
     let runtime = get_test_runtime().await;
 
     let bs = BlobStoreService::create(

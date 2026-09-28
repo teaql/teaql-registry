@@ -68,7 +68,10 @@ impl NpmEngine {
             )
             .await?;
 
-            let path = format!("/{}/-/{}", doc.name, filename);
+            // npm may submit scoped attachment keys such as
+            // @scope/package-version.tgz. The download route has one tarball
+            // segment, so store the canonical basename returned in metadata.
+            let path = format!("/{}/-/{}-{}.tgz", doc.name, name, version);
             AssetService::upsert_asset(
                 ctx,
                 content_repo.id(),
@@ -118,10 +121,11 @@ impl NpmEngine {
         for c in matching {
             let ver = c.version_name().to_string();
             latest_ver = ver.clone();
+            let encoded_package_name = package_name.replace('/', "%2F");
             let tarball_url = format!(
                 "{}/{}/-/{}-{}.tgz",
                 base_url.trim_end_matches('/'),
-                package_name,
+                encoded_package_name,
                 name,
                 ver
             );

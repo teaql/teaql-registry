@@ -194,6 +194,14 @@ builds a clean consumer through SwiftPM:
 ./scripts/verify_native_clients.sh
 ```
 
+The native Cargo check runs first: its fixture uses Serde, verifies the
+published sparse-index dependency, and compiles a downloaded consumer. It
+fails on stale Registry binaries that publish a dependency-free index record.
+The complete native-client suite needs HTTPS for authenticated Go module
+downloads; Go intentionally refuses credentials in an insecure HTTP
+`GOPROXY`. A Cargo PASS in a later red multi-format run is only the Cargo gate,
+not proof that the whole suite passed.
+
 ### 4. Build and Run from Source
 
 ```bash
@@ -217,6 +225,8 @@ cargo run --release -p teaql-registry
 ### 5. Pure In-Memory High-Performance Mode
 
 > **Resource Sizing & Guidance**: In-memory mode holds all binary payloads directly in RAM and consumes significantly more memory (estimated **100MB–300MB** for code packages; **1GB–3GB** if storing container images/binaries). Standard **filesystem or local S3 storage is the recommended default** for almost all workflows. Use memory mode specifically when running inside ephemeral stateless containers or when benchmarking ultra-low-latency agent loops.
+
+The registry binary explicitly reserves a **32 MiB stack per Tokio worker** for the generated TeaQL schema/mutation path; this applies in both storage modes. Size high-core deployments with that per-worker virtual-memory budget in mind. The full seven-format integration suite and an isolated nine-crate Cargo publication chain pass without setting `RUST_MIN_STACK`; the underlying large-future stack cost is still a separate optimization target.
 
 ```bash
 # Via CLI flag

@@ -1,9 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
-use crate::format::cargo::{get_cargo_index_path, CargoIndexConfig, CargoIndexRecord};
+use crate::format::cargo::{CargoIndexConfig, CargoIndexRecord};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
 pub struct CargoEngine;
@@ -26,6 +26,7 @@ impl CargoEngine {
         blobstore: &dyn BlobStore,
         crate_name: &str,
         version: &str,
+        publish_metadata: &serde_json::Value,
         crate_data: &[u8],
     ) -> Result<()> {
         let content_repo =
@@ -65,14 +66,31 @@ impl CargoEngine {
         )
         .await?;
 
-        // Also record index entry
-        let index_subpath = get_cargo_index_path(crate_name);
-        let index_path = format!("/{}", index_subpath);
+        // Preserve the Publish API metadata in its sparse-index form. Cargo
+        // cannot resolve a crate from an entry that drops its dependencies.
+        let record = CargoIndexRecord::from_publish_metadata(
+            publish_metadata,
+            blob_info.checksums.sha256.clone(),
+        )?;
+        let index_data = serde_json::to_vec(&record)?;
+        let index_blob = blobstore.create_blob(&index_data).await?;
+        let index_asset_blob = AssetService::create_asset_blob(
+            ctx,
+            repo.blob_store_id(),
+            &index_blob.blob_ref,
+            index_blob.size,
+            "application/json",
+            &index_blob.checksums.sha1,
+            &index_blob.checksums.sha256,
+            &index_blob.checksums.md5,
+        )
+        .await?;
+        let index_path = format!("/cargo/index-record/{crate_name}/{version}");
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),
             Some(comp.id()),
-            asset_blob.id(),
+            index_asset_blob.id(),
             &index_path,
             "index",
         )
@@ -84,6 +102,7 @@ impl CargoEngine {
     pub async fn get_sparse_index(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
+        blobstore: &dyn BlobStore,
         crate_name: &str,
     ) -> Result<Option<String>> {
         let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {
@@ -117,17 +136,31 @@ impl CargoEngine {
                         .unwrap_or_default(),
                     None => String::new(),
                 };
-            let record = CargoIndexRecord {
-                name: crate_name.to_string(),
-                vers: c.version_name().to_string(),
-                deps: Vec::new(),
-                cksum: checksum,
-                features: serde_json::json!({}),
-                yanked: false,
-            };
-            if let Ok(json_str) = serde_json::to_string(&record) {
-                lines.push(json_str);
-            }
+            let index_path = format!("/cargo/index-record/{crate_name}/{}", c.version_name());
+            let asset = AssetService::find_by_path(ctx, content_repo.id(), &index_path)
+                .await?
+                .ok_or_else(|| anyhow!(
+                    "Cargo index metadata missing for {crate_name}@{}; republish or migrate this legacy artifact before consumption",
+                    c.version_name()
+                ))?;
+            let index_blob = AssetService::get_asset_blob(ctx, asset.asset_blob_id())
+                .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Cargo index blob missing for {crate_name}@{}",
+                        c.version_name()
+                    )
+                })?;
+            let index_data = blobstore.read_blob(&index_blob.blob_ref()).await?;
+            let record: CargoIndexRecord = serde_json::from_slice(&index_data)?;
+            anyhow::ensure!(
+                record.name == crate_name
+                    && record.vers == c.version_name()
+                    && record.cksum == checksum,
+                "Cargo index metadata disagrees with archive for {crate_name}@{}",
+                c.version_name()
+            );
+            lines.push(serde_json::to_string(&record)?);
         }
 
         Ok(Some(lines.join("\n")))

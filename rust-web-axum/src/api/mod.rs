@@ -178,7 +178,7 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/repository/:name/api/v1/crates/new",
-            put(cargo_registry::handle_cargo_publish),
+            put(cargo_registry::handle_cargo_publish).layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/repository/:name/cargo/index/*index_path",
@@ -234,7 +234,9 @@ pub fn build_app(state: AppState) -> Router {
         // Go Modules (GOPROXY)
         .route(
             "/repository/:name/gomod/*path",
-            get(gomod_registry::handle_gomod_get).put(gomod_registry::handle_gomod_put),
+            get(gomod_registry::handle_gomod_get)
+                .put(gomod_registry::handle_gomod_put)
+                .layer(DefaultBodyLimit::disable()),
         )
         // Swift Package Registry (SE-0292 / SE-0391)
         .route(
@@ -264,7 +266,8 @@ pub fn build_app(state: AppState) -> Router {
             "/repository/:name/*path",
             get(repository_content::handle_get_content)
                 .head(repository_content::handle_head_content)
-                .put(repository_content::handle_put_content),
+                .put(repository_content::handle_put_content)
+                .layer(DefaultBodyLimit::disable()),
         )
         // REST API v1
         .nest("/service/rest/v1", rest_router)

@@ -30,8 +30,12 @@ async fn setup_engine_env() -> (
     (runtime, blobstore, bs.id())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_hosted_engine_write_policies() {
+#[test]
+fn test_hosted_engine_write_policies() {
+    common::run_with_large_stack(test_hosted_engine_write_policies_body);
+}
+
+async fn test_hosted_engine_write_policies_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     // 1. ALLOW_WRITE repo
@@ -157,8 +161,12 @@ async fn test_hosted_engine_write_policies() {
     assert!(ro_res.is_err(), "Expected READ_ONLY repo to reject uploads");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_hosted_engine_missing_asset() {
+#[test]
+fn test_hosted_engine_missing_asset() {
+    common::run_with_large_stack(test_hosted_engine_missing_asset_body);
+}
+
+async fn test_hosted_engine_missing_asset_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     let repo_name = format!("repo-missing-{}", uuid::Uuid::new_v4().simple());
@@ -183,8 +191,12 @@ async fn test_hosted_engine_missing_asset() {
     assert!(missing_resp.is_none());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_group_engine_routing() {
+#[test]
+fn test_group_engine_routing() {
+    common::run_with_large_stack(test_group_engine_routing_body);
+}
+
+async fn test_group_engine_routing_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     let member1_name = format!("member1-{}", uuid::Uuid::new_v4().simple());

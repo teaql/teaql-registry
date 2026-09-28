@@ -9,8 +9,12 @@ use teaql_registry::engine::hosted::HostedEngine;
 use teaql_registry::services::{ComponentService, RepositoryService};
 use teaql_registry_core::service_runtime;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_pure_memory_mode_single_latest_version_retention() {
+#[test]
+fn test_pure_memory_mode_single_latest_version_retention() {
+    common::run_with_large_stack(test_pure_memory_mode_single_latest_version_retention_body);
+}
+
+async fn test_pure_memory_mode_single_latest_version_retention_body() {
     let config = common::runtime_config();
     let mut runtime = service_runtime(config).await.expect("Runtime error");
     runtime.ensure_schema().await.expect("Schema error");
