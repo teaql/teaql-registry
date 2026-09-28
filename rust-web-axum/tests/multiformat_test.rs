@@ -544,8 +544,9 @@ async fn gomod_registry_lifecycle_body() {
     let module = format!("github.com/example/lib-{}", uuid::Uuid::new_v4().simple());
     let mod_content = b"module github.com/example/lib\n\ngo 1.22\n";
     let zip_content = b"fake-go-module-zip-binary";
+    let info_content = br#"{"Version":"v1.0.0","Time":"2026-09-28T10:00:00Z"}"#;
 
-    // 1. Upload go.mod and .zip
+    // 1. Upload all Go proxy artifacts, including the authoritative .info metadata.
     let put_mod_req = Request::builder()
         .method(Method::PUT)
         .uri(format!(
@@ -567,6 +568,17 @@ async fn gomod_registry_lifecycle_body() {
         .unwrap();
     let put_zip_resp = app.clone().oneshot(put_zip_req).await.unwrap();
     assert_eq!(put_zip_resp.status(), StatusCode::CREATED);
+
+    let put_info_req = Request::builder()
+        .method(Method::PUT)
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.info",
+            module
+        ))
+        .body(axum::body::Body::from(Bytes::from_static(info_content)))
+        .unwrap();
+    let put_info_resp = app.clone().oneshot(put_info_req).await.unwrap();
+    assert_eq!(put_info_resp.status(), StatusCode::CREATED);
 
     // 2. Query @v/list
     let list_req = Request::builder()
@@ -596,6 +608,14 @@ async fn gomod_registry_lifecycle_body() {
         .unwrap();
     let info_resp = app.clone().oneshot(info_req).await.unwrap();
     assert_eq!(info_resp.status(), StatusCode::OK);
+    assert_eq!(
+        info_resp.headers()[header::CONTENT_TYPE],
+        "application/json"
+    );
+    let info_bytes = axum::body::to_bytes(info_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(info_bytes.as_ref(), info_content);
 
     // 4. Download @v/v1.0.0.mod & zip
     let dl_mod_req = Request::builder()

@@ -3,7 +3,6 @@ use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 
 use crate::api::AppState;
@@ -92,7 +91,7 @@ pub async fn handle_gomod_get(
         }
     };
 
-    let (module, version, ext) = parsed;
+    let (module, _version, ext) = parsed;
 
     if ext == "list" {
         match GoModEngine::list_versions(&request.runtime, &repo, &module).await {
@@ -120,66 +119,6 @@ pub async fn handle_gomod_get(
                     HeaderValue::from_static("text/plain; charset=utf-8"),
                 );
                 (StatusCode::OK, res_headers, list).into_response()
-            }
-            Err(e) => {
-                ServiceLogService::log_event(
-                    &request.runtime,
-                    request.tenant_id,
-                    "system",
-                    request.user_id as i64,
-                    &username,
-                    &client_ip,
-                    "download",
-                    &repo_name,
-                    &path,
-                    "gomod",
-                    0,
-                    "error",
-                    &e.to_string(),
-                )
-                .await;
-                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-            }
-        }
-    } else if ext == "info" {
-        match GoModEngine::get_version_info(&request.runtime, &repo, &module, &version).await {
-            Ok(Some(info)) => {
-                ServiceLogService::log_event(
-                    &request.runtime,
-                    request.tenant_id,
-                    "service",
-                    request.user_id as i64,
-                    &username,
-                    &client_ip,
-                    "download",
-                    &repo_name,
-                    &path,
-                    "gomod",
-                    0,
-                    "success",
-                    "",
-                )
-                .await;
-                Json(info).into_response()
-            }
-            Ok(None) => {
-                ServiceLogService::log_event(
-                    &request.runtime,
-                    request.tenant_id,
-                    "service",
-                    request.user_id as i64,
-                    &username,
-                    &client_ip,
-                    "download",
-                    &repo_name,
-                    &path,
-                    "gomod",
-                    0,
-                    "error",
-                    "Version info not found",
-                )
-                .await;
-                (StatusCode::NOT_FOUND, "Version info not found").into_response()
             }
             Err(e) => {
                 ServiceLogService::log_event(
