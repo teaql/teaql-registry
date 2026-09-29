@@ -12,6 +12,7 @@ use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, MemoryBlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
+    schema_indexes::ensure_application_indexes,
     services::{BlobStoreService, RepositoryService, TenantService},
 };
 use teaql_registry_core::service_runtime;
@@ -19,12 +20,35 @@ use tower::ServiceExt;
 
 async fn setup_multiformat_test_app() -> axum::Router {
     let config = common::runtime_config();
+    let postgres_config = config
+        .database_url
+        .parse::<tokio_postgres::Config>()
+        .unwrap();
+    let pool_manager = deadpool_postgres::Manager::new(postgres_config, tokio_postgres::NoTls);
+    let index_pool = deadpool_postgres::Pool::builder(pool_manager)
+        .build()
+        .unwrap();
     let runtime = Arc::new(
         service_runtime(config)
             .await
             .expect("Runtime connect error"),
     );
     runtime.ensure_schema().await.expect("Schema init error");
+    ensure_application_indexes(&index_pool)
+        .await
+        .expect("Registry index init error");
+    let index_exists: bool = index_pool
+        .get()
+        .await
+        .unwrap()
+        .query_one(
+            "SELECT to_regclass('ux_asset_content_repository_path') IS NOT NULL",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert!(index_exists, "Go asset path uniqueness index is required");
     if TenantService::find_tenant_by_code(&runtime, "default")
         .await
         .unwrap()
@@ -580,6 +604,45 @@ async fn gomod_registry_lifecycle_body() {
     let put_info_resp = app.clone().oneshot(put_info_req).await.unwrap();
     assert_eq!(put_info_resp.status(), StatusCode::CREATED);
 
+    // Repeated PUTs must not replace artifacts or even create unused blob metadata.
+    let replacement = format!("replacement payload for {module}");
+    for extension in ["mod", "zip", "info"] {
+        let duplicate_req = Request::builder()
+            .method(Method::PUT)
+            .uri(format!(
+                "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.{}",
+                module, extension
+            ))
+            .body(axum::body::Body::from(replacement.clone()))
+            .unwrap();
+        let duplicate_resp = app.clone().oneshot(duplicate_req).await.unwrap();
+        assert_eq!(duplicate_resp.status(), StatusCode::CONFLICT);
+    }
+    let postgres_config = common::runtime_config()
+        .database_url
+        .parse::<tokio_postgres::Config>()
+        .unwrap();
+    let (client, connection) = postgres_config
+        .connect(tokio_postgres::NoTls)
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let replacement_hash = hex::encode(sha2::Sha256::digest(replacement.as_bytes()));
+    let replacement_blobs: i64 = client
+        .query_one(
+            "SELECT count(*) FROM asset_blob_data WHERE sha256_checksum = $1",
+            &[&replacement_hash],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(
+        replacement_blobs, 0,
+        "duplicate PUT allocated blob metadata"
+    );
+
     // 2. Query @v/list
     let list_req = Request::builder()
         .method(Method::GET)
@@ -632,6 +695,65 @@ async fn gomod_registry_lifecycle_body() {
         .await
         .unwrap();
     assert_eq!(dl_mod_bytes.as_ref(), mod_content);
+
+    let dl_zip_req = Request::builder()
+        .method(Method::GET)
+        .uri(format!(
+            "/repository/gomod-hosted/gomod/{}/@v/v1.0.0.zip",
+            module
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let dl_zip_resp = app.clone().oneshot(dl_zip_req).await.unwrap();
+    assert_eq!(dl_zip_resp.status(), StatusCode::OK);
+    let dl_zip_bytes = axum::body::to_bytes(dl_zip_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(dl_zip_bytes.as_ref(), zip_content);
+}
+
+#[test]
+fn test_gomod_concurrent_put_preserves_one_artifact() {
+    common::run_with_large_stack(gomod_concurrent_put_body);
+}
+
+async fn gomod_concurrent_put_body() {
+    let app = setup_multiformat_test_app().await;
+    let module = format!(
+        "github.com/example/concurrent-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let uri = format!("/repository/gomod-hosted/gomod/{module}/@v/v1.0.0.mod");
+    let first = Request::builder()
+        .method(Method::PUT)
+        .uri(uri.clone())
+        .body(axum::body::Body::from("first upload"))
+        .unwrap();
+    let second = Request::builder()
+        .method(Method::PUT)
+        .uri(uri.clone())
+        .body(axum::body::Body::from("second upload"))
+        .unwrap();
+    let (first_result, second_result) =
+        tokio::join!(app.clone().oneshot(first), app.clone().oneshot(second));
+    let statuses = [
+        first_result.unwrap().status(),
+        second_result.unwrap().status(),
+    ];
+    assert!(statuses.contains(&StatusCode::CREATED), "{statuses:?}");
+    assert!(statuses.contains(&StatusCode::CONFLICT), "{statuses:?}");
+
+    let get = Request::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(get).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(body.as_ref() == b"first upload" || body.as_ref() == b"second upload");
 }
 
 #[test]

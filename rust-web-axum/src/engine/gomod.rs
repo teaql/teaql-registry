@@ -7,6 +7,14 @@ use crate::services::{AssetService, ComponentService, RepositoryService};
 
 pub struct GoModEngine;
 
+#[derive(Debug, thiserror::Error)]
+pub enum GoModUploadError {
+    #[error("Go module artifact already exists; versions are immutable")]
+    Conflict,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 impl GoModEngine {
     pub async fn upload_artifact(
         ctx: &ServiceRuntime,
@@ -16,9 +24,16 @@ impl GoModEngine {
         version: &str,
         ext: &str,
         data: &[u8],
-    ) -> Result<()> {
+    ) -> std::result::Result<(), GoModUploadError> {
         let content_repo =
             RepositoryService::ensure_content_repository(ctx, repo.id(), "gomod").await?;
+        let path = format!("/{}/@v/{}.{}", module, version, ext);
+        if AssetService::find_by_path(ctx, content_repo.id(), &path)
+            .await?
+            .is_some()
+        {
+            return Err(GoModUploadError::Conflict);
+        }
         let blob_info = blobstore.create_blob(data).await?;
 
         let ct = match ext {
@@ -44,18 +59,31 @@ impl GoModEngine {
             ComponentService::find_or_create(ctx, content_repo.id(), "", module, version, ext)
                 .await?;
 
-        let path = format!("/{}/@v/{}.{}", module, version, ext);
-        AssetService::upsert_asset(
+        match AssetService::create(
             ctx,
             content_repo.id(),
-            Some(comp.id()),
+            comp.id(),
             asset_blob.id(),
             &path,
             ext,
         )
-        .await?;
-
-        Ok(())
+        .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                // The unique index closes the race between precheck and insert.
+                // If the competing request won, report the same conflict as a
+                // sequential duplicate while preserving its stored bytes.
+                if AssetService::find_by_path(ctx, content_repo.id(), &path)
+                    .await?
+                    .is_some()
+                {
+                    Err(GoModUploadError::Conflict)
+                } else {
+                    Err(error.into())
+                }
+            }
+        }
     }
 
     pub async fn list_versions(

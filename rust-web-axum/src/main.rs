@@ -8,6 +8,7 @@ use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, MemoryBlobStore, S3BlobStore},
     context::RegistryContextExt,
+    schema_indexes::ensure_application_indexes,
     security::password::{hash_password, validate_password_strength, verify_password},
     services::{SecurityService, TenantService},
 };
@@ -397,19 +398,6 @@ fn generate_random_password(len: usize) -> String {
             CHARSET[idx] as char
         })
         .collect()
-}
-
-async fn ensure_application_indexes(pool: &deadpool_postgres::Pool) -> anyhow::Result<()> {
-    let client = pool.get().await?;
-    client
-        .batch_execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_personal_access_token_token_id \
-             ON personal_access_token_data(token_id); \
-             CREATE UNIQUE INDEX IF NOT EXISTS ux_personal_access_token_token_hash \
-             ON personal_access_token_data(token_hash);",
-        )
-        .await?;
-    Ok(())
 }
 
 const REGISTRY_WORKER_STACK_BYTES: usize = 32 * 1024 * 1024;
