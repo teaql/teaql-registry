@@ -6,6 +6,7 @@ use axum::{
 };
 
 use crate::api::AppState;
+use crate::engine::gomod::GoModUploadError;
 use crate::engine::GoModEngine;
 use crate::format::gomod::parse_gomod_path;
 use crate::services::RepositoryService;
@@ -319,6 +320,25 @@ pub async fn handle_gomod_put(
             )
             .await;
             StatusCode::CREATED.into_response()
+        }
+        Err(GoModUploadError::Conflict) => {
+            ServiceLogService::log_event(
+                &request.runtime,
+                request.tenant_id,
+                "service",
+                request.user_id as i64,
+                &username,
+                &client_ip,
+                "upload",
+                &repo_name,
+                &path,
+                "gomod",
+                size,
+                "conflict",
+                "Go module artifact already exists",
+            )
+            .await;
+            (StatusCode::CONFLICT, "Go module artifact already exists").into_response()
         }
         Err(e) => {
             ServiceLogService::log_event(

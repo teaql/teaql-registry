@@ -3,6 +3,7 @@ pub mod blobstore;
 pub mod context;
 pub mod engine;
 pub mod format;
+pub mod schema_indexes;
 pub mod security;
 pub mod services;
 pub mod ui;
