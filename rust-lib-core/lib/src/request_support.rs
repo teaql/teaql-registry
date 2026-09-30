@@ -1,54 +1,65 @@
-
 #![allow(unused_imports)]
 #![allow(async_fn_in_trait)]
 use std::{collections::BTreeMap, future::Future, marker::PhantomData};
 
 use serde_json::Value as JsonValue;
 use teaql_core::{
-    BinaryOp, Expr, Record,
-    RelationAggregate as RuntimeRelationAggregate, SelectQuery, SmartList,
+    BinaryOp, CompactRow, Expr, RelationAggregate as RuntimeRelationAggregate, SelectQuery,
+    SmartList,
 };
-use teaql_runtime::{ContextError, GraphNode, EntityDataServiceBehavior, DataServiceError, PurposedSelectQuery, RuntimeError, UserContext};
+use teaql_runtime::{
+    ContextError, DataServiceError, EntityDataServiceBehavior, GraphNode, PurposedSelectQuery,
+    RuntimeError, UserContext,
+};
 
-pub type TeaqlEntityStream<'a, T, E> = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<T, E>> + 'a>>;
+pub type TeaqlEntityStream<'a, T, E> =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<T, E>> + 'a>>;
 
 // Re-export query builder types from teaql_core::request
 pub use teaql_core::request::{
+    apply_relation_selections, apply_runtime_metadata, attach_facets, dynamic_json_filter_expr,
+    dynamic_json_operator, dynamic_json_u64_field, dynamic_json_value_to_teaql_value,
+    dynamic_json_values, field_operator_column_expr, field_operator_expr,
+    merge_outer_filter_into_facet_aggregates, remove_default_live_filter, remove_filter_expr,
+    required_text, required_value, runtime_relation_aggregates, DateRange, EntityReference,
+    FacetRequest, FieldOperator, ObjectGroupBy, QueryOptions, QuerySelection, RawDynamicProperty,
+    RawProjection, RelationAggregate, RelationFilter, RelationSelection, UnsafeRawSqlSegment,
     COUNT_ALIAS, TYPE_FIELD, TYPE_GROUP_FIELD,
-    FieldOperator, DateRange, EntityReference,
-    QuerySelection, RelationSelection, RelationFilter, QueryOptions,
-    UnsafeRawSqlSegment, RawDynamicProperty, RawProjection,
-    RelationAggregate, FacetRequest, ObjectGroupBy,
-    apply_relation_selections, apply_runtime_metadata,
-    field_operator_expr, field_operator_column_expr,
-    required_value, required_text,
-    remove_default_live_filter, remove_filter_expr,
-    dynamic_json_value_to_teaql_value, dynamic_json_values,
-    dynamic_json_operator, dynamic_json_filter_expr,
-    dynamic_json_u64_field,
-    runtime_relation_aggregates,
-    merge_outer_filter_into_facet_aggregates, attach_facets,
 };
 
-
-pub trait TeaqlRecordRepository {
+pub trait TeaqlQueryRepository {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn fetch_all(&self, query: &PurposedSelectQuery) -> Result<Vec<Record>, DataServiceError<Self::Error>>;
+    async fn fetch_all(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<Vec<CompactRow>, DataServiceError<Self::Error>>;
 
-    async fn fetch_smart_list(&self, query: &PurposedSelectQuery) -> Result<SmartList<Record>, DataServiceError<Self::Error>>;
+    async fn fetch_smart_list(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<SmartList<CompactRow>, DataServiceError<Self::Error>>;
 
     async fn fetch_smart_list_with_relation_aggregates(
         &self,
         query: &PurposedSelectQuery,
         relation_aggregates: &[RuntimeRelationAggregate],
-    ) -> Result<SmartList<Record>, DataServiceError<Self::Error>>;
+    ) -> Result<SmartList<CompactRow>, DataServiceError<Self::Error>>;
 
-    async fn fetch_stream<'a>(&'a self, query: &PurposedSelectQuery) -> Result<teaql_data_service::QueryStream<'a, DataServiceError<Self::Error>>, DataServiceError<Self::Error>>;
+    async fn fetch_stream<'a>(
+        &'a self,
+        query: &PurposedSelectQuery,
+    ) -> Result<
+        teaql_data_service::QueryStream<'a, DataServiceError<Self::Error>>,
+        DataServiceError<Self::Error>,
+    >;
 }
 
-pub trait TeaqlEntityRepository: TeaqlRecordRepository {
-    async fn fetch_enhanced_entities<T>(&self, query: &PurposedSelectQuery) -> Result<SmartList<T>, DataServiceError<Self::Error>>
+pub trait TeaqlEntityRepository: TeaqlQueryRepository {
+    async fn fetch_enhanced_entities<T>(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<SmartList<T>, DataServiceError<Self::Error>>
     where
         T: teaql_core::Entity;
 
@@ -60,19 +71,37 @@ pub trait TeaqlEntityRepository: TeaqlRecordRepository {
     where
         T: teaql_core::Entity;
 
+    async fn fetch_enhanced_entities_with_relation_aggregates_owned<T>(
+        &self,
+        query: PurposedSelectQuery,
+        relation_aggregates: &[RuntimeRelationAggregate],
+    ) -> Result<SmartList<T>, DataServiceError<Self::Error>>
+    where
+        T: teaql_core::Entity;
 }
 
-impl<'a, E> TeaqlRecordRepository for teaql_runtime::EntityDataService<'a, E>
+impl<'a, E> TeaqlQueryRepository for teaql_runtime::EntityDataService<'a, E>
 where
-    E: teaql_data_service::QueryExecutor + teaql_data_service::MutationExecutor + teaql_data_service::StreamQueryExecutor + Send + Sync + 'static,
+    E: teaql_data_service::QueryExecutor
+        + teaql_data_service::MutationExecutor
+        + teaql_data_service::StreamQueryExecutor
+        + Send
+        + Sync
+        + 'static,
 {
     type Error = E::Error;
 
-    async fn fetch_all(&self, query: &PurposedSelectQuery) -> Result<Vec<Record>, DataServiceError<Self::Error>> {
+    async fn fetch_all(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<Vec<CompactRow>, DataServiceError<Self::Error>> {
         teaql_runtime::EntityDataService::fetch_all(self, query).await
     }
 
-    async fn fetch_smart_list(&self, query: &PurposedSelectQuery) -> Result<SmartList<Record>, DataServiceError<Self::Error>> {
+    async fn fetch_smart_list(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<SmartList<CompactRow>, DataServiceError<Self::Error>> {
         teaql_runtime::EntityDataService::fetch_smart_list(self, query).await
     }
 
@@ -80,24 +109,39 @@ where
         &self,
         query: &PurposedSelectQuery,
         relation_aggregates: &[RuntimeRelationAggregate],
-    ) -> Result<SmartList<Record>, DataServiceError<Self::Error>> {
+    ) -> Result<SmartList<CompactRow>, DataServiceError<Self::Error>> {
         teaql_runtime::EntityDataService::fetch_smart_list_with_relation_aggregates(
             self,
             query,
             relation_aggregates,
-        ).await
+        )
+        .await
     }
 
-    async fn fetch_stream<'b>(&'b self, query: &PurposedSelectQuery) -> Result<teaql_data_service::QueryStream<'b, DataServiceError<Self::Error>>, DataServiceError<Self::Error>> {
+    async fn fetch_stream<'b>(
+        &'b self,
+        query: &PurposedSelectQuery,
+    ) -> Result<
+        teaql_data_service::QueryStream<'b, DataServiceError<Self::Error>>,
+        DataServiceError<Self::Error>,
+    > {
         teaql_runtime::EntityDataService::fetch_stream(self, query).await
     }
 }
 
 impl<'a, E> TeaqlEntityRepository for teaql_runtime::EntityDataService<'a, E>
 where
-    E: teaql_data_service::QueryExecutor + teaql_data_service::MutationExecutor + teaql_data_service::StreamQueryExecutor + Send + Sync + 'static,
+    E: teaql_data_service::QueryExecutor
+        + teaql_data_service::MutationExecutor
+        + teaql_data_service::StreamQueryExecutor
+        + Send
+        + Sync
+        + 'static,
 {
-    async fn fetch_enhanced_entities<T>(&self, query: &PurposedSelectQuery) -> Result<SmartList<T>, DataServiceError<Self::Error>>
+    async fn fetch_enhanced_entities<T>(
+        &self,
+        query: &PurposedSelectQuery,
+    ) -> Result<SmartList<T>, DataServiceError<Self::Error>>
     where
         T: teaql_core::Entity,
     {
@@ -116,27 +160,56 @@ where
             self,
             query,
             relation_aggregates,
-        ).await
+        )
+        .await
     }
 
+    async fn fetch_enhanced_entities_with_relation_aggregates_owned<T>(
+        &self,
+        query: PurposedSelectQuery,
+        relation_aggregates: &[RuntimeRelationAggregate],
+    ) -> Result<SmartList<T>, DataServiceError<Self::Error>>
+    where
+        T: teaql_core::Entity,
+    {
+        teaql_runtime::EntityDataService::fetch_enhanced_entities_with_relation_aggregates_owned(
+            self,
+            query,
+            relation_aggregates,
+        )
+        .await
+    }
 }
 
-pub type TeaqlDataServiceError<R> = DataServiceError<<R as TeaqlRecordRepository>::Error>;
+pub type TeaqlDataServiceError<R> = DataServiceError<<R as TeaqlQueryRepository>::Error>;
 
 pub(crate) fn authorize_query(mut query: SelectQuery) -> Result<PurposedSelectQuery, RuntimeError> {
-    if query.comment.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none() {
+    if query
+        .comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
         return Err(RuntimeError::Graph(
-            "generated query reached the repository without .comment(...)".to_owned()
+            "generated query reached the repository without .comment(...)".to_owned(),
         ));
     }
-    let purpose = query
+    let purpose_index = query
         .trace_chain
-        .pop()
-        .map(|node| node.comment)
-        .filter(|purpose| !purpose.trim().is_empty())
-        .ok_or_else(|| RuntimeError::Graph(
-            "generated query reached the repository without .purpose(...)".to_owned()
-        ))?;
+        .iter()
+        .rposition(|node| node.kind == teaql_core::TraceKind::Purpose)
+        .ok_or_else(|| {
+            RuntimeError::Graph(
+                "generated query reached the repository without .purpose(...)".to_owned(),
+            )
+        })?;
+    let purpose = query.trace_chain.remove(purpose_index).comment;
+    if purpose.trim().is_empty() {
+        return Err(RuntimeError::Graph(
+            "generated query reached the repository without .purpose(...)".to_owned(),
+        ));
+    }
     Ok(PurposedSelectQuery::new(query, purpose))
 }
 
@@ -149,7 +222,7 @@ pub trait TeaqlRuntime {
         query: &PurposedSelectQuery,
         relation_aggregates: &[RuntimeRelationAggregate],
         trace_context: Vec<teaql_core::TraceNode>,
-    ) -> impl std::future::Future<Output = Result<SmartList<Record>, RuntimeError>> + Send;
+    ) -> impl std::future::Future<Output = Result<SmartList<CompactRow>, RuntimeError>> + Send;
 }
 
 /// Internal trait for repository access. Application code should not use this trait directly.
@@ -159,10 +232,12 @@ where
     C: TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>>;
+    type Entity;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>;
 }
-
-
 
 pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     type PlatformRepository<'a>: TeaqlEntityRepository + 'a
@@ -179,12 +254,16 @@ pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     where
         Self: 'a;
 
-    fn repository_type_repository(&self) -> Result<Self::RepositoryTypeRepository<'_>, ContextError>;
+    fn repository_type_repository(
+        &self,
+    ) -> Result<Self::RepositoryTypeRepository<'_>, ContextError>;
     type RepositoryFormatRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
 
-    fn repository_format_repository(&self) -> Result<Self::RepositoryFormatRepository<'_>, ContextError>;
+    fn repository_format_repository(
+        &self,
+    ) -> Result<Self::RepositoryFormatRepository<'_>, ContextError>;
     type WritePolicyRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
@@ -194,7 +273,8 @@ pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     where
         Self: 'a;
 
-    fn blob_store_type_repository(&self) -> Result<Self::BlobStoreTypeRepository<'_>, ContextError>;
+    fn blob_store_type_repository(&self)
+        -> Result<Self::BlobStoreTypeRepository<'_>, ContextError>;
     type UserStatusRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
@@ -204,17 +284,23 @@ pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     where
         Self: 'a;
 
-    fn blob_store_configuration_repository(&self) -> Result<Self::BlobStoreConfigurationRepository<'_>, ContextError>;
+    fn blob_store_configuration_repository(
+        &self,
+    ) -> Result<Self::BlobStoreConfigurationRepository<'_>, ContextError>;
     type RepositoryConfigurationRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
 
-    fn repository_configuration_repository(&self) -> Result<Self::RepositoryConfigurationRepository<'_>, ContextError>;
+    fn repository_configuration_repository(
+        &self,
+    ) -> Result<Self::RepositoryConfigurationRepository<'_>, ContextError>;
     type ContentRepositoryRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
 
-    fn content_repository_repository(&self) -> Result<Self::ContentRepositoryRepository<'_>, ContextError>;
+    fn content_repository_repository(
+        &self,
+    ) -> Result<Self::ContentRepositoryRepository<'_>, ContextError>;
     type ComponentRepository<'a>: TeaqlEntityRepository + 'a
     where
         Self: 'a;
@@ -244,7 +330,35 @@ pub trait TeaqlRepositoryProvider: TeaqlRuntime {
     where
         Self: 'a;
 
-    fn security_privilege_repository(&self) -> Result<Self::SecurityPrivilegeRepository<'_>, ContextError>;
+    fn security_privilege_repository(
+        &self,
+    ) -> Result<Self::SecurityPrivilegeRepository<'_>, ContextError>;
+    type SecurityUserRoleRepository<'a>: TeaqlEntityRepository + 'a
+    where
+        Self: 'a;
+
+    fn security_user_role_repository(
+        &self,
+    ) -> Result<Self::SecurityUserRoleRepository<'_>, ContextError>;
+    type SecurityRolePrivilegeRepository<'a>: TeaqlEntityRepository + 'a
+    where
+        Self: 'a;
+
+    fn security_role_privilege_repository(
+        &self,
+    ) -> Result<Self::SecurityRolePrivilegeRepository<'_>, ContextError>;
+    type PersonalAccessTokenRepository<'a>: TeaqlEntityRepository + 'a
+    where
+        Self: 'a;
+
+    fn personal_access_token_repository(
+        &self,
+    ) -> Result<Self::PersonalAccessTokenRepository<'_>, ContextError>;
+    type ServiceLogRepository<'a>: TeaqlEntityRepository + 'a
+    where
+        Self: 'a;
+
+    fn service_log_repository(&self) -> Result<Self::ServiceLogRepository<'_>, ContextError>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -261,26 +375,34 @@ impl TeaqlUserContextExt for teaql_runtime::UserContext {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), DataServiceError<<crate::runtime::DataServiceExecutor as teaql_data_service::DataServiceExecutor>::Error>>>,
     {
-        let executor = self.require_resource::<crate::runtime::DataServiceExecutor>().map_err(|err| {
-            DataServiceError::Runtime(RuntimeError::Graph(format!(
-                "cannot start transaction without executor: {err}"
-            )))
-        })?;
-        let root = self.entity_root();
+        let executor = self
+            .require_resource::<crate::runtime::DataServiceExecutor>()
+            .map_err(|err| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "cannot start transaction without executor: {err}"
+                )))
+            })?;
+        let root = self.entity_runtime_state();
 
-        let tx = teaql_data_service::TransactionExecutor::begin(&*executor).await.map_err(DataServiceError::Executor)?;
+        let tx = teaql_data_service::TransactionExecutor::begin(&*executor)
+            .await
+            .map_err(DataServiceError::Executor)?;
         root.push_change_set();
 
         let result = f().await;
         match result {
             Ok(()) => {
                 root.pop_change_set();
-                teaql_data_service::Transaction::commit(tx).await.map_err(DataServiceError::Executor)?;
+                teaql_data_service::Transaction::commit(tx)
+                    .await
+                    .map_err(DataServiceError::Executor)?;
                 Ok(())
             }
             Err(err) => {
                 root.pop_change_set();
-                teaql_data_service::Transaction::rollback(tx).await.map_err(DataServiceError::Executor)?;
+                teaql_data_service::Transaction::rollback(tx)
+                    .await
+                    .map_err(DataServiceError::Executor)?;
                 Err(err)
             }
         }
@@ -298,7 +420,7 @@ impl TeaqlRuntime for teaql_runtime::UserContext {
         query: &PurposedSelectQuery,
         relation_aggregates: &[RuntimeRelationAggregate],
         trace_context: Vec<teaql_core::TraceNode>,
-    ) -> Result<SmartList<Record>, RuntimeError> {
+    ) -> Result<SmartList<CompactRow>, RuntimeError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>(entity)
             .map_err(|err| RuntimeError::Graph(err.to_string()))?
             .with_trace_context(trace_context)
@@ -309,7 +431,8 @@ impl TeaqlRuntime for teaql_runtime::UserContext {
 }
 
 impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
-    type PlatformRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type PlatformRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -317,7 +440,8 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("Platform")
     }
 
-    type TenantRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type TenantRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -325,23 +449,30 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("Tenant")
     }
 
-    type RepositoryTypeRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type RepositoryTypeRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn repository_type_repository(&self) -> Result<Self::RepositoryTypeRepository<'_>, ContextError> {
+    fn repository_type_repository(
+        &self,
+    ) -> Result<Self::RepositoryTypeRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("RepositoryType")
     }
 
-    type RepositoryFormatRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type RepositoryFormatRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn repository_format_repository(&self) -> Result<Self::RepositoryFormatRepository<'_>, ContextError> {
+    fn repository_format_repository(
+        &self,
+    ) -> Result<Self::RepositoryFormatRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("RepositoryFormat")
     }
 
-    type WritePolicyRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type WritePolicyRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -349,15 +480,19 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("WritePolicy")
     }
 
-    type BlobStoreTypeRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type BlobStoreTypeRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn blob_store_type_repository(&self) -> Result<Self::BlobStoreTypeRepository<'_>, ContextError> {
+    fn blob_store_type_repository(
+        &self,
+    ) -> Result<Self::BlobStoreTypeRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("BlobStoreType")
     }
 
-    type UserStatusRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type UserStatusRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -365,31 +500,41 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("UserStatus")
     }
 
-    type BlobStoreConfigurationRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type BlobStoreConfigurationRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn blob_store_configuration_repository(&self) -> Result<Self::BlobStoreConfigurationRepository<'_>, ContextError> {
+    fn blob_store_configuration_repository(
+        &self,
+    ) -> Result<Self::BlobStoreConfigurationRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("BlobStoreConfiguration")
     }
 
-    type RepositoryConfigurationRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type RepositoryConfigurationRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn repository_configuration_repository(&self) -> Result<Self::RepositoryConfigurationRepository<'_>, ContextError> {
+    fn repository_configuration_repository(
+        &self,
+    ) -> Result<Self::RepositoryConfigurationRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("RepositoryConfiguration")
     }
 
-    type ContentRepositoryRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type ContentRepositoryRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn content_repository_repository(&self) -> Result<Self::ContentRepositoryRepository<'_>, ContextError> {
+    fn content_repository_repository(
+        &self,
+    ) -> Result<Self::ContentRepositoryRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("ContentRepository")
     }
 
-    type ComponentRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type ComponentRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -397,7 +542,8 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("Component")
     }
 
-    type AssetBlobRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type AssetBlobRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -405,7 +551,8 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("AssetBlob")
     }
 
-    type AssetRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type AssetRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -413,7 +560,8 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("Asset")
     }
 
-    type SecurityUserRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type SecurityUserRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -421,7 +569,8 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityUser")
     }
 
-    type SecurityRoleRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type SecurityRoleRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
@@ -429,20 +578,65 @@ impl TeaqlRepositoryProvider for teaql_runtime::UserContext {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityRole")
     }
 
-    type SecurityPrivilegeRepository<'a> = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    type SecurityPrivilegeRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
     where
         Self: 'a;
 
-    fn security_privilege_repository(&self) -> Result<Self::SecurityPrivilegeRepository<'_>, ContextError> {
+    fn security_privilege_repository(
+        &self,
+    ) -> Result<Self::SecurityPrivilegeRepository<'_>, ContextError> {
         self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityPrivilege")
+    }
+
+    type SecurityUserRoleRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    where
+        Self: 'a;
+
+    fn security_user_role_repository(
+        &self,
+    ) -> Result<Self::SecurityUserRoleRepository<'_>, ContextError> {
+        self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityUserRole")
+    }
+
+    type SecurityRolePrivilegeRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    where
+        Self: 'a;
+
+    fn security_role_privilege_repository(
+        &self,
+    ) -> Result<Self::SecurityRolePrivilegeRepository<'_>, ContextError> {
+        self.entity_data_service::<crate::runtime::DataServiceExecutor>("SecurityRolePrivilege")
+    }
+
+    type PersonalAccessTokenRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    where
+        Self: 'a;
+
+    fn personal_access_token_repository(
+        &self,
+    ) -> Result<Self::PersonalAccessTokenRepository<'_>, ContextError> {
+        self.entity_data_service::<crate::runtime::DataServiceExecutor>("PersonalAccessToken")
+    }
+
+    type ServiceLogRepository<'a>
+        = teaql_runtime::EntityDataService<'a, crate::runtime::DataServiceExecutor>
+    where
+        Self: 'a;
+
+    fn service_log_repository(&self) -> Result<Self::ServiceLogRepository<'_>, ContextError> {
+        self.entity_data_service::<crate::runtime::DataServiceExecutor>("ServiceLog")
     }
 }
 
 pub(crate) async fn execute_facets<C>(
-    ctx: &C,
+    context: &C,
     outer_query: &SelectQuery,
     options: &QueryOptions,
-) -> Result<BTreeMap<String, SmartList<Record>>, RuntimeError>
+) -> Result<BTreeMap<String, SmartList<CompactRow>>, RuntimeError>
 where
     C: TeaqlRuntime + ?Sized,
 {
@@ -451,7 +645,12 @@ where
         let mut selection = facet.query.clone();
         merge_outer_filter_into_facet_aggregates(&mut selection, outer_query);
         if !facet.include_all_facets {
-            selection = restrict_facet_to_outer_query(ctx, selection, outer_query, &facet.relation_name)?;
+            selection = restrict_facet_to_outer_query(
+                context,
+                selection,
+                outer_query,
+                &facet.relation_name,
+            )?;
         }
         let relation_aggregates = runtime_relation_aggregates(&selection.query_options);
         let query = apply_runtime_metadata(
@@ -467,18 +666,18 @@ where
             facet.facet_name.clone(),
         ));
 
-        let query = PurposedSelectQuery::new(
-            query,
-            format!("Calculate facet {}", facet.facet_name),
-        );
-        let facet_rows = ctx.fetch_facet_smart_list(&entity, &query, &relation_aggregates, chain).await?;
+        let query =
+            PurposedSelectQuery::new(query, format!("Calculate facet {}", facet.facet_name));
+        let facet_rows = context
+            .fetch_facet_smart_list(&entity, &query, &relation_aggregates, chain)
+            .await?;
         facets.insert(facet.facet_name.clone(), facet_rows);
     }
     Ok(facets)
 }
 
 pub(crate) fn restrict_facet_to_outer_query<C>(
-    ctx: &C,
+    context: &C,
     mut selection: QuerySelection,
     outer_query: &SelectQuery,
     relation_name: &str,
@@ -486,7 +685,7 @@ pub(crate) fn restrict_facet_to_outer_query<C>(
 where
     C: TeaqlRuntime + ?Sized,
 {
-    let descriptor = ctx
+    let descriptor = context
         .user_context()
         .entity(&outer_query.entity)
         .cloned()

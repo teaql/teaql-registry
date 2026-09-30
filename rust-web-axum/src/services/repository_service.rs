@@ -1,9 +1,7 @@
-use anyhow::{anyhow, Result};
-use teaql_registry_core::{
-    ContentRepository, Q, RepositoryConfiguration, ServiceRuntime,
-};
-use teaql_core::{Entity, SmartList};
 use crate::services::SaveAuditedExt;
+use anyhow::{anyhow, Result};
+use teaql_core::{Entity, SmartList};
+use teaql_registry_core::{ContentRepository, RepositoryConfiguration, ServiceRuntime, Q};
 
 use crate::context::NexusContextExt;
 
@@ -14,8 +12,8 @@ impl RepositoryService {
         let rows = Q::repository_configurations_minimal()
             .select_self_fields()
             .limit(1000)
-            .comment("what: Load all repository configurations for tenant")
-            .purpose("why: REST repositories list API")
+            .comment("what: query tenant repository configuration")
+            .purpose("why: resolve an isolated package repository")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list repositories: {}", e))?;
@@ -30,8 +28,8 @@ impl RepositoryService {
             .select_self_fields()
             .filter_by_tenant(tenant_id)
             .limit(1000)
-            .comment("what: Load all repository configurations for tenant")
-            .purpose("why: REST repositories list API")
+            .comment("what: query tenant repository configuration")
+            .purpose("why: resolve an isolated package repository")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list repositories: {}", e))?;
@@ -46,8 +44,8 @@ impl RepositoryService {
             .select_self_fields()
             .with_name_is(name)
             .limit(1)
-            .comment("what: Load repository configuration by name")
-            .purpose("why: Route request to specific repository")
+            .comment("what: query tenant repository configuration")
+            .purpose("why: resolve an isolated package repository")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find repository: {}", e))?;
@@ -64,14 +62,15 @@ impl RepositoryService {
             .filter_by_tenant(tenant_id)
             .with_name_is(name)
             .limit(1)
-            .comment("what: Load repository configuration by name and tenant")
-            .purpose("why: Route request to specific repository")
+            .comment("what: query tenant repository configuration")
+            .purpose("why: resolve an isolated package repository")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find repository: {}", e))?;
         Ok(rows.into_iter().next())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         ctx: &ServiceRuntime,
         name: &str,
@@ -99,6 +98,7 @@ impl RepositoryService {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_with_tenant(
         ctx: &ServiceRuntime,
         tenant_id: u64,
@@ -112,7 +112,8 @@ impl RepositoryService {
         remote_url: &str,
     ) -> Result<RepositoryConfiguration> {
         let mut entity = Q::repository_configurations()
-            .purpose("why: Create new RepositoryConfiguration")
+            .comment("what: create tenant repository configuration")
+            .purpose("why: provision an isolated package repository")
             .new_entity(ctx);
 
         entity.update_tenant_id(tenant_id);
@@ -123,33 +124,84 @@ impl RepositoryService {
         entity.update_remote_url(remote_url);
 
         match repo_type.to_uppercase().as_str() {
-            "HOSTED" => { entity.update_repository_type_to_hosted(); }
-            "PROXY" => { entity.update_repository_type_to_proxy(); }
-            "GROUP" => { entity.update_repository_type_to_group(); }
-            _ => { entity.update_repository_type_to_hosted(); }
+            "HOSTED" => {
+                entity.update_repository_type_to_hosted();
+            }
+            "PROXY" => {
+                entity.update_repository_type_to_proxy();
+            }
+            "GROUP" => {
+                entity.update_repository_type_to_group();
+            }
+            _ => {
+                entity.update_repository_type_to_hosted();
+            }
         }
 
         match format.to_uppercase().as_str() {
-            "MAVEN2" | "MAVEN" => { entity.update_repository_format_to_maven2(); }
-            "RAW" => { entity.update_repository_format_to_raw(); }
-            "DOCKER" => { entity.update_repository_format_to_docker(); }
-            "NPM" => { entity.update_repository_format_to_npm(); }
-            "PYPI" => { entity.update_repository_format_to_pypi(); }
-            "GOMOD" => { entity.update_repository_format_to_gomod(); }
-            "CARGO" => { entity.update_repository_format_to_cargo(); }
-            "NUGET" => { entity.update_repository_format_to_nuget(); }
-            _ => { entity.update_repository_format_to_raw(); }
+            "MAVEN2" | "MAVEN" => {
+                entity.update_repository_format_to_maven2();
+            }
+            "RAW" => {
+                entity.update_repository_format_to_raw();
+            }
+            "DOCKER" => {
+                entity.update_repository_format_to_docker();
+            }
+            "NPM" => {
+                entity.update_repository_format_to_npm();
+            }
+            "PYPI" => {
+                entity.update_repository_format_to_pypi();
+            }
+            "GOMOD" => {
+                entity.update_repository_format_to_gomod();
+            }
+            "CARGO" => {
+                entity.update_repository_format_to_cargo();
+            }
+            "NUGET" => {
+                entity.update_repository_format_to_nuget();
+            }
+            "SWIFT" | "SPM" => {
+                entity.update_repository_format_to_swift();
+            }
+            "DART" | "PUB" => {
+                entity.update_repository_format_to_dart();
+            }
+            "RUBYGEMS" | "RUBY" | "GEM" => {
+                entity.update_repository_format_to_rubygems();
+            }
+            "COMPOSER" | "PHP" => {
+                entity.update_repository_format_to_composer();
+            }
+            "CONAN" | "CPP" | "CXX" => {
+                entity.update_repository_format_to_conan();
+            }
+            "HEX" | "ELIXIR" | "ERLANG" => {
+                entity.update_repository_format_to_hex();
+            }
+            _ => {
+                entity.update_repository_format_to_raw();
+            }
         }
 
         match write_policy.to_uppercase().as_str() {
-            "ALLOW_WRITE" => { entity.update_write_policy_to_allow_write(); }
-            "ALLOW_ONCE" => { entity.update_write_policy_to_allow_once(); }
-            "READ_ONLY" => { entity.update_write_policy_to_read_only(); }
-            _ => { entity.update_write_policy_to_allow_write(); }
+            "ALLOW_WRITE" => {
+                entity.update_write_policy_to_allow_write();
+            }
+            "ALLOW_ONCE" => {
+                entity.update_write_policy_to_allow_once();
+            }
+            "READ_ONLY" => {
+                entity.update_write_policy_to_read_only();
+            }
+            _ => {
+                entity.update_write_policy_to_allow_write();
+            }
         }
 
-        entity
-            .clone()
+        let entity = entity
             .audit_as("Creating repository configuration")
             .save_with(ctx)
             .await
@@ -167,30 +219,29 @@ impl RepositoryService {
         format_name: &str,
     ) -> Result<ContentRepository> {
         let records = Q::content_repositories_minimal()
-            .select_repository_id()
-            .select_format_name()
+            .select_self_fields()
             .with_repository_id_is(repo_id)
             .limit(1)
-            .comment("what: Check existing content repository")
-            .purpose("why: Prevent duplicate content repository records")
-            .execute_for_records(ctx)
+            .comment("what: locate content repository mapping")
+            .purpose("why: reuse the tenant-scoped repository identity")
+            .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to query content repository: {}", e))?;
 
-        if let Some(rec) = records.into_iter().next() {
-            let cr = ContentRepository::from_record(rec).map_err(|e| anyhow!("Failed to parse content repository: {}", e))?;
-            return Ok(cr);
+        if let Some(entity) = records.into_iter().next() {
+            return Ok(entity);
         }
 
         let mut cr_entity = Q::content_repositories()
-            .purpose("why: Create content repository record")
+            .comment("what: create tenant repository configuration")
+            .purpose("why: provision an isolated package repository")
             .new_entity(ctx);
 
+        cr_entity.update_tenant_id(ctx.tenant_id());
         cr_entity.update_repository_id(repo_id);
         cr_entity.update_format_name(format_name);
 
-        cr_entity
-            .clone()
+        let cr_entity = cr_entity
             .audit_as("Creating content repository mapping")
             .save_with(ctx)
             .await
@@ -204,21 +255,15 @@ impl RepositoryService {
         repo_id: u64,
     ) -> Result<Option<ContentRepository>> {
         let records = Q::content_repositories_minimal()
-            .select_repository_id()
-            .select_format_name()
+            .select_self_fields()
             .with_repository_id_is(repo_id)
             .limit(1)
-            .comment("what: Load content repository by repo id")
-            .purpose("why: Find content repository container")
-            .execute_for_records(ctx)
+            .comment("what: load content repository mapping")
+            .purpose("why: resolve registry package metadata")
+            .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to load content repository: {}", e))?;
 
-        if let Some(rec) = records.into_iter().next() {
-            let cr = ContentRepository::from_record(rec).map_err(|e| anyhow!("Failed to parse content repository: {}", e))?;
-            Ok(Some(cr))
-        } else {
-            Ok(None)
-        }
+        Ok(records.into_iter().next())
     }
 }

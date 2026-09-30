@@ -111,4 +111,56 @@ impl BlobStore for FileBlobStore {
     fn store_name(&self) -> &str {
         &self.store_name
     }
+
+    async fn create_blob_from_stream(
+        &self,
+        mut stream: crate::blobstore::ByteStream,
+    ) -> Result<BlobInfo> {
+        use futures_util::StreamExt;
+        let blob_id = Uuid::new_v4().to_string();
+        let blob_ref = format!("{}@{}", self.store_name, blob_id);
+        let blob_path = self.get_blob_path(&blob_id);
+
+        if let Some(parent) = blob_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        let mut file = File::create(&blob_path).await?;
+        let mut sha1_hasher = Sha1::new();
+        let mut sha256_hasher = Sha256::new();
+        let mut md5_hasher = Md5::new();
+        let mut total_size: i64 = 0;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| anyhow::anyhow!("stream read error: {}", e))?;
+            file.write_all(&chunk).await?;
+            sha1_hasher.update(&chunk);
+            sha256_hasher.update(&chunk);
+            md5_hasher.update(&chunk);
+            total_size += chunk.len() as i64;
+        }
+        file.flush().await?;
+
+        Ok(BlobInfo {
+            blob_id,
+            blob_ref,
+            size: total_size,
+            checksums: BlobChecksums {
+                sha1: hex::encode(sha1_hasher.finalize()),
+                sha256: hex::encode(sha256_hasher.finalize()),
+                md5: hex::encode(md5_hasher.finalize()),
+            },
+        })
+    }
+
+    async fn read_blob_stream(&self, blob_ref: &str) -> Result<crate::blobstore::ByteStream> {
+        let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
+        let blob_path = self.get_blob_path(blob_id);
+        let file = File::open(&blob_path)
+            .await
+            .with_context(|| format!("Blob not found: {}", blob_ref))?;
+        let reader = tokio::io::BufReader::new(file);
+        let stream = tokio_util::io::ReaderStream::new(reader);
+        Ok(Box::pin(stream))
+    }
 }

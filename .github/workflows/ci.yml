@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Generated runtime registration currently exceeds Rust/Tokio's small
+  # default test-thread stack. Keep this explicit until the generator emits a
+  # flatter registration path.
+  RUST_MIN_STACK: 16777216
+  TOKIO_WORKER_STACK_SIZE: 16777216
+
+jobs:
+  check:
+    name: Check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check generated domain library
+        run: cargo check -p teaql-registry-service-core --all-targets
+      - name: Check application formatting
+        run: cargo fmt -p teaql-registry -p registry-tui -- --check
+      - name: Lint application-owned code
+        run: cargo clippy -p teaql-registry -p registry-tui --all-targets --no-deps -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexus_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nexus_db
+      TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER: postgres
+      TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test -- --test-threads=1

@@ -1,21 +1,21 @@
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+#![recursion_limit = "256"]
+
+mod common;
+
+use std::sync::Arc;
 use teaql_registry::{
     blobstore::{BlobStore, S3BlobStore},
     engine::{GroupEngine, HostedEngine},
     services::{BlobStoreService, RepositoryService},
 };
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 
 async fn setup_engine_env() -> (
     Arc<teaql_registry_core::ServiceRuntime>,
     Arc<dyn BlobStore>,
     u64,
 ) {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("connect error"));
     runtime.ensure_schema().await.expect("schema error");
 
@@ -30,8 +30,12 @@ async fn setup_engine_env() -> (
     (runtime, blobstore, bs.id())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_hosted_engine_write_policies() {
+#[test]
+fn test_hosted_engine_write_policies() {
+    common::run_with_large_stack(test_hosted_engine_write_policies_body);
+}
+
+async fn test_hosted_engine_write_policies_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     // 1. ALLOW_WRITE repo
@@ -77,10 +81,11 @@ async fn test_hosted_engine_write_policies() {
     .await
     .expect("Overwrite in ALLOW_WRITE should succeed");
 
-    let (bytes, content_type) = HostedEngine::handle_get(&runtime, &repo_allow_write, &blobstore, path)
-        .await
-        .unwrap()
-        .expect("Asset should exist");
+    let (bytes, content_type) =
+        HostedEngine::handle_get(&runtime, &repo_allow_write, &blobstore, path)
+            .await
+            .unwrap()
+            .expect("Asset should exist");
     assert_eq!(bytes.as_ref(), data_v2);
     assert_eq!(content_type, "text/plain");
 
@@ -156,8 +161,12 @@ async fn test_hosted_engine_write_policies() {
     assert!(ro_res.is_err(), "Expected READ_ONLY repo to reject uploads");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_hosted_engine_missing_asset() {
+#[test]
+fn test_hosted_engine_missing_asset() {
+    common::run_with_large_stack(test_hosted_engine_missing_asset_body);
+}
+
+async fn test_hosted_engine_missing_asset_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     let repo_name = format!("repo-missing-{}", uuid::Uuid::new_v4().simple());
@@ -182,8 +191,12 @@ async fn test_hosted_engine_missing_asset() {
     assert!(missing_resp.is_none());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_group_engine_routing() {
+#[test]
+fn test_group_engine_routing() {
+    common::run_with_large_stack(test_group_engine_routing_body);
+}
+
+async fn test_group_engine_routing_body() {
     let (runtime, blobstore, bs_id) = setup_engine_env().await;
 
     let member1_name = format!("member1-{}", uuid::Uuid::new_v4().simple());

@@ -53,10 +53,13 @@ pub struct SearchResponse<T> {
 }
 
 pub async fn handle_search_components(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Query(params): Query<SearchQueryParams>,
 ) -> Response {
-    let repos = match RepositoryService::list(&state.runtime).await {
+    let repos = match RepositoryService::list(&request.runtime).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
@@ -70,20 +73,26 @@ pub async fn handle_search_components(
             }
         }
         if let Some(ref target_format) = params.format {
-            if !repo.recipe_name().to_lowercase().contains(&target_format.to_lowercase()) {
+            if !repo
+                .recipe_name()
+                .to_lowercase()
+                .contains(&target_format.to_lowercase())
+            {
                 continue;
             }
         }
 
-        let content_repo = match RepositoryService::get_content_repository(&state.runtime, repo.id()).await {
-            Ok(Some(cr)) => cr,
-            _ => continue,
-        };
+        let content_repo =
+            match RepositoryService::get_content_repository(&request.runtime, repo.id()).await {
+                Ok(Some(cr)) => cr,
+                _ => continue,
+            };
 
-        let components = match ComponentService::list_by_repository(&state.runtime, content_repo.id()).await {
-            Ok(c) => c,
-            _ => continue,
-        };
+        let components =
+            match ComponentService::list_by_repository(&request.runtime, content_repo.id()).await {
+                Ok(c) => c,
+                _ => continue,
+            };
 
         for comp in components {
             // Filter by name
@@ -100,7 +109,11 @@ pub async fn handle_search_components(
             }
             // Filter by group/namespace
             if let Some(ref grp) = params.group {
-                if !comp.namespace().to_lowercase().contains(&grp.to_lowercase()) {
+                if !comp
+                    .namespace()
+                    .to_lowercase()
+                    .contains(&grp.to_lowercase())
+                {
                     continue;
                 }
             }
@@ -116,17 +129,17 @@ pub async fn handle_search_components(
             }
 
             // Fetch assets for this component
-            let assets = match AssetService::list_by_component(&state.runtime, comp.id()).await {
-                Ok(a) => a,
-                _ => vec![],
-            };
+            let assets: Vec<_> = AssetService::list_by_component(&request.runtime, comp.id())
+                .await
+                .unwrap_or_default();
 
             let mut asset_items = Vec::new();
             for asset in assets {
-                let asset_blob = AssetService::get_asset_blob(&state.runtime, asset.asset_blob_id())
-                    .await
-                    .ok()
-                    .flatten();
+                let asset_blob =
+                    AssetService::get_asset_blob(&request.runtime, asset.asset_blob_id())
+                        .await
+                        .ok()
+                        .flatten();
 
                 let mut checksums = HashMap::new();
                 let (size, content_type) = if let Some(ref blob) = asset_blob {
@@ -183,10 +196,13 @@ pub async fn handle_search_components(
 }
 
 pub async fn handle_search_assets(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Query(params): Query<SearchQueryParams>,
 ) -> Response {
-    let repos = match RepositoryService::list(&state.runtime).await {
+    let repos = match RepositoryService::list(&request.runtime).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
@@ -200,20 +216,26 @@ pub async fn handle_search_assets(
             }
         }
         if let Some(ref target_format) = params.format {
-            if !repo.recipe_name().to_lowercase().contains(&target_format.to_lowercase()) {
+            if !repo
+                .recipe_name()
+                .to_lowercase()
+                .contains(&target_format.to_lowercase())
+            {
                 continue;
             }
         }
 
-        let content_repo = match RepositoryService::get_content_repository(&state.runtime, repo.id()).await {
-            Ok(Some(cr)) => cr,
-            _ => continue,
-        };
+        let content_repo =
+            match RepositoryService::get_content_repository(&request.runtime, repo.id()).await {
+                Ok(Some(cr)) => cr,
+                _ => continue,
+            };
 
-        let assets = match AssetService::list_by_repository(&state.runtime, content_repo.id()).await {
-            Ok(a) => a,
-            _ => continue,
-        };
+        let assets =
+            match AssetService::list_by_repository(&request.runtime, content_repo.id()).await {
+                Ok(a) => a,
+                _ => continue,
+            };
 
         for asset in assets {
             if let Some(ref kw) = params.keyword {
@@ -222,7 +244,7 @@ pub async fn handle_search_assets(
                 }
             }
 
-            let asset_blob = AssetService::get_asset_blob(&state.runtime, asset.asset_blob_id())
+            let asset_blob = AssetService::get_asset_blob(&request.runtime, asset.asset_blob_id())
                 .await
                 .ok()
                 .flatten();

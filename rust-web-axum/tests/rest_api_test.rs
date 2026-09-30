@@ -1,21 +1,21 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::{header, Method, Request, StatusCode};
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use serde_json::json;
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     security::password::hash_password,
     services::{BlobStoreService, RepositoryService, SecurityService},
 };
-use serde_json::json;
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
 
 async fn setup_rest_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = Arc::new(service_runtime(config).await.expect("connect error"));
     runtime.ensure_schema().await.expect("schema error");
 
@@ -62,11 +62,15 @@ async fn setup_rest_test_app() -> axum::Router {
         .unwrap();
     }
 
-    build_app(AppState { runtime, blobstore })
+    build_app(AppState::new(runtime, blobstore))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_status_endpoints() {
+#[test]
+fn test_rest_status_endpoints() {
+    common::run_with_large_stack(test_rest_status_endpoints_body);
+}
+
+async fn test_rest_status_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     let req = Request::builder()
@@ -84,8 +88,12 @@ async fn test_rest_status_endpoints() {
     assert_eq!(resp_writable.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_repositories_endpoints() {
+#[test]
+fn test_rest_repositories_endpoints() {
+    common::run_with_large_stack(test_rest_repositories_endpoints_body);
+}
+
+async fn test_rest_repositories_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // 1. List repositories
@@ -126,8 +134,12 @@ async fn test_rest_repositories_endpoints() {
     assert_eq!(create_resp.status(), StatusCode::CREATED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_blobstores_endpoints() {
+#[test]
+fn test_rest_blobstores_endpoints() {
+    common::run_with_large_stack(test_rest_blobstores_endpoints_body);
+}
+
+async fn test_rest_blobstores_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // List blobstores
@@ -154,8 +166,12 @@ async fn test_rest_blobstores_endpoints() {
     assert_eq!(create_resp.status(), StatusCode::CREATED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_security_endpoints() {
+#[test]
+fn test_rest_security_endpoints() {
+    common::run_with_large_stack(test_rest_security_endpoints_body);
+}
+
+async fn test_rest_security_endpoints_body() {
     let app = setup_rest_test_app().await;
 
     // 1. List users
@@ -168,12 +184,13 @@ async fn test_rest_security_endpoints() {
 
     // 2. Create user
     let uname = format!("user-{}", uuid::Uuid::new_v4().simple());
+    let password = format!("Tq9!{}#Registry", uuid::Uuid::new_v4().simple());
     let user_body = json!({
         "userId": uname,
         "firstName": "John",
         "lastName": "Doe",
         "emailAddress": "john.doe@example.com",
-        "password": "Password123!",
+        "password": password,
         "status": "active",
         "roles": ["nx-admin"]
     });
@@ -215,15 +232,20 @@ async fn test_rest_security_endpoints() {
         .uri("/service/rest/v1/security/anonymous")
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(
-            json!({"enabled": true, "userId": "anonymous", "realmName": "NexusAuthorizingRealm"}).to_string(),
+            json!({"enabled": true, "userId": "anonymous", "realmName": "NexusAuthorizingRealm"})
+                .to_string(),
         ))
         .unwrap();
     let anon_put_resp = app.oneshot(anon_put).await.unwrap();
-    assert_eq!(anon_put_resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(anon_put_resp.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_components_and_assets() {
+#[test]
+fn test_rest_components_and_assets() {
+    common::run_with_large_stack(test_rest_components_and_assets_body);
+}
+
+async fn test_rest_components_and_assets_body() {
     let app = setup_rest_test_app().await;
 
     // Components for maven-releases

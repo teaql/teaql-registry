@@ -54,6 +54,12 @@
         <_value id="1006" name="Go Modules" code="GOMOD" />
         <_value id="1007" name="Cargo" code="CARGO" />
         <_value id="1008" name="NuGet" code="NUGET" />
+        <_value id="1009" name="Swift Package" code="SWIFT" />
+        <_value id="1010" name="Dart Pub" code="DART" />
+        <_value id="1011" name="RubyGems" code="RUBYGEMS" />
+        <_value id="1012" name="Composer" code="COMPOSER" />
+        <_value id="1013" name="Conan" code="CONAN" />
+        <_value id="1014" name="Hex" code="HEX" />
     </repository_format>
 
     <write_policy
@@ -129,6 +135,7 @@
         _name="Content Repository"
         _module="Repository Domain"
         _module_key="repository"
+        tenant="tenant()"
         repository_id="1l"
         format_name="maven2" />
 
@@ -199,5 +206,58 @@
         privilege_type="wildcard"
         permission_pattern="*.*.*"
         read_only="true" />
+
+    <security_user_role
+        _name="Security User Role Assignment"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        security_user="security_user()"
+        security_role="security_role()" />
+
+    <security_role_privilege
+        _name="Security Role Privilege Assignment"
+        _module="Security Domain"
+        _module_key="security"
+        tenant="tenant()"
+        security_role="security_role()"
+        security_privilege="security_privilege()" />
+
+    <personal_access_token
+        _name="Personal Access Token"
+        _module="Security Domain"
+        _module_key="security"
+        _audit_mask_fields="token_id,token_hash"
+        tenant="tenant()"
+        security_user="security_user()"
+        username="automation-user"
+        token_id="token-identifier"
+        token_hash="sha256-token-hash"
+        description="automation token"
+        scopes="repository:read"
+        created_at="createTime()"
+        expires_at_epoch_millis="0l"
+        revoked="false"
+        revoked_at_epoch_millis="0l" />
+
+
+    <service_log
+        _name="Service Log"
+        _module="Audit Domain"
+        _module_key="audit"
+        _log="true"
+        tenant="tenant()"
+        event_time="createTime()"
+        log_type="service"
+        operator_id="0l"
+        operator_name="system"
+        client_ip="127.0.0.1"
+        action="upload"
+        repository_name="maven-releases"
+        artifact_path="/com/example/lib/1.0/lib-1.0.jar"
+        format_name="maven2"
+        content_size="0l"
+        status="success"
+        error_message="none" />
 
 </root>

@@ -1,26 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { RepositoriesView } from './components/RepositoriesView';
 import { ArtifactsView } from './components/ArtifactsView';
 import { StorageOpsView } from './components/StorageOpsView';
 import { AccessTokensView } from './components/AccessTokensView';
+import { ServiceLogsView } from './components/ServiceLogsView';
 import { fetchRepositories } from './api';
 import { Repository } from './types';
-import { FolderGit2, Search, Database, Key } from 'lucide-react';
+import { FolderGit2, Search, Database, Key, ScrollText } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'repositories' | 'artifacts' | 'storage' | 'tokens'>('repositories');
+  const [activeTab, setActiveTab] = useState<'repositories' | 'artifacts' | 'storage' | 'tokens' | 'logs'>('repositories');
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepoForSearch, setSelectedRepoForSearch] = useState<string>('');
 
-  const loadRepos = async () => {
+  const loadRepos = useCallback(async () => {
     const list = await fetchRepositories();
     setRepositories(list);
-  };
+  }, []);
 
   useEffect(() => {
     loadRepos();
-  }, []);
+  }, [loadRepos]);
 
   const handleSelectRepoForSearch = (repoName: string) => {
     setSelectedRepoForSearch(repoName);
@@ -65,6 +66,14 @@ export const App: React.FC = () => {
             <Key size={18} />
             <span>Access Tokens</span>
           </button>
+
+          <button
+            className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('logs')}
+          >
+            <ScrollText size={18} />
+            <span>Service Logs</span>
+          </button>
         </div>
       </div>
 
@@ -92,8 +101,13 @@ export const App: React.FC = () => {
         {activeTab === 'tokens' && (
           <AccessTokensView />
         )}
+
+        {activeTab === 'logs' && (
+          <ServiceLogsView />
+        )}
       </main>
     </div>
   );
 };
+
 export default App;

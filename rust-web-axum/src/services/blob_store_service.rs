@@ -1,9 +1,7 @@
-use anyhow::{anyhow, Result};
-use teaql_registry_core::{
-    BlobStoreConfiguration, Q, ServiceRuntime,
-};
-use teaql_core::{Entity, SmartList};
 use crate::services::SaveAuditedExt;
+use anyhow::{anyhow, Result};
+use teaql_core::{Entity, SmartList};
+use teaql_registry_core::{BlobStoreConfiguration, ServiceRuntime, Q};
 
 use crate::context::NexusContextExt;
 
@@ -14,8 +12,8 @@ impl BlobStoreService {
         let rows = Q::blob_store_configurations_minimal()
             .select_self_fields()
             .limit(1000)
-            .comment("what: Load all blob store configurations for tenant")
-            .purpose("why: REST blobstores list API")
+            .comment("what: query tenant blob store configuration")
+            .purpose("why: resolve durable package content storage")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list blob stores: {}", e))?;
@@ -30,8 +28,8 @@ impl BlobStoreService {
             .select_self_fields()
             .filter_by_tenant(tenant_id)
             .limit(1000)
-            .comment("what: Load all blob store configurations for tenant")
-            .purpose("why: REST blobstores list API")
+            .comment("what: query tenant blob store configuration")
+            .purpose("why: resolve durable package content storage")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list blob stores: {}", e))?;
@@ -46,8 +44,8 @@ impl BlobStoreService {
             .select_self_fields()
             .with_name_is(name)
             .limit(1)
-            .comment("what: Load blob store configuration by name")
-            .purpose("why: Find blob store for repository operations")
+            .comment("what: query tenant blob store configuration")
+            .purpose("why: resolve durable package content storage")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find blob store: {}", e))?;
@@ -64,8 +62,8 @@ impl BlobStoreService {
             .filter_by_tenant(tenant_id)
             .with_name_is(name)
             .limit(1)
-            .comment("what: Load blob store configuration by name and tenant")
-            .purpose("why: Find blob store for repository operations")
+            .comment("what: query tenant blob store configuration")
+            .purpose("why: resolve durable package content storage")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find blob store: {}", e))?;
@@ -90,7 +88,8 @@ impl BlobStoreService {
         is_file: bool,
     ) -> Result<BlobStoreConfiguration> {
         let mut entity = Q::blob_store_configurations()
-            .purpose("why: Create new BlobStoreConfiguration")
+            .comment("what: create tenant blob store configuration")
+            .purpose("why: provision durable package content storage")
             .new_entity(ctx);
 
         entity.update_tenant_id(tenant_id);
@@ -104,8 +103,7 @@ impl BlobStoreService {
             entity.update_blob_store_type_to_s3();
         }
 
-        entity
-            .clone()
+        let entity = entity
             .audit_as("Creating blob store configuration")
             .save_with(ctx)
             .await

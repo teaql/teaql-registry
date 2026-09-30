@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> WritePolicyRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .write_policy_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,65 @@ impl<R> WritePolicyRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        SmartList<teaql_core::CompactRow>,
+        TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .write_policy_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>,
+        TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .write_policy_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +181,8 @@ impl<R> WritePolicyRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +190,30 @@ impl<R> WritePolicyRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
@@ -187,23 +221,39 @@ impl<R> WritePolicyRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .write_policy_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +265,21 @@ impl<R> WritePolicyRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for WritePolicy is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for WritePolicy is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .write_policy_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +287,6 @@ impl<R> WritePolicyRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .write_policy_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +342,11 @@ impl<R> WritePolicyRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +356,12 @@ impl<R> WritePolicyRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +378,6 @@ impl<R> WritePolicyRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +398,9 @@ impl<R> WritePolicyRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -494,18 +518,13 @@ impl<R> WritePolicyRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "platform" => {
-                self.with_platform_matching(
-                    crate::Q::platforms_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "repository_configuration_list" => {
-                self.with_repository_configuration_list_matching(
-                    crate::Q::repository_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "platform" => self.with_platform_matching(
+                crate::Q::platforms_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "repository_configuration_list" => self.with_repository_configuration_list_matching(
+                crate::Q::repository_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -579,6 +598,31 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
+        self
+    }
+
     pub fn top(self, top_n: u64) -> Self {
         self.limit(top_n)
     }
@@ -647,12 +691,24 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -692,12 +748,20 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -728,7 +792,9 @@ impl<R> WritePolicyRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -744,9 +810,7 @@ impl<R> WritePolicyRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -799,7 +863,6 @@ impl<R> WritePolicyRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -817,19 +880,13 @@ impl<R> WritePolicyRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -840,10 +897,9 @@ impl<R> WritePolicyRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -851,10 +907,9 @@ impl<R> WritePolicyRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -877,7 +932,6 @@ impl<R> WritePolicyRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_name(mut self) -> Self {
         self.query = self.query.project("name");
@@ -906,9 +960,7 @@ impl<R> WritePolicyRequest<R> {
     pub fn group_by_name_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("name");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("name"));
+        request.query = request.query.project_expr(alias, Expr::column("name"));
         request
     }
 
@@ -963,10 +1015,11 @@ impl<R> WritePolicyRequest<R> {
 
     pub fn unselect_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "name");
         self
     }
-
 
     pub fn with_name(
         mut self,
@@ -997,8 +1050,6 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("name", value));
         self
@@ -1009,7 +1060,10 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-    pub fn with_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("name", value));
         self
     }
@@ -1037,11 +1091,9 @@ impl<R> WritePolicyRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("name", range.start, range.end));
         self
     }
 
@@ -1049,10 +1101,9 @@ impl<R> WritePolicyRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "name",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("name", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1116,13 +1167,10 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("name"));
         self
     }
-
 
     pub fn order_by_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("name");
@@ -1143,7 +1191,6 @@ impl<R> WritePolicyRequest<R> {
         self.query = self.query.order_gbk_desc("name");
         self
     }
-
 
     pub fn select_code(mut self) -> Self {
         self.query = self.query.project("code");
@@ -1172,9 +1219,7 @@ impl<R> WritePolicyRequest<R> {
     pub fn group_by_code_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("code");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("code"));
+        request.query = request.query.project_expr(alias, Expr::column("code"));
         request
     }
 
@@ -1229,10 +1274,11 @@ impl<R> WritePolicyRequest<R> {
 
     pub fn unselect_code(mut self) -> Self {
         self.query.projection.retain(|field| field != "code");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "code");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "code");
         self
     }
-
 
     pub fn with_code(
         mut self,
@@ -1263,8 +1309,6 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("code", value));
         self
@@ -1275,7 +1319,10 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-    pub fn with_code_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_code_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("code", value));
         self
     }
@@ -1303,11 +1350,9 @@ impl<R> WritePolicyRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "code",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("code", range.start, range.end));
         self
     }
 
@@ -1315,10 +1360,9 @@ impl<R> WritePolicyRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "code",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("code", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1382,13 +1426,10 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("code"));
         self
     }
-
 
     pub fn order_by_code_asc(mut self) -> Self {
         self.query = self.query.order_asc("code");
@@ -1417,9 +1458,7 @@ impl<R> WritePolicyRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -1491,147 +1530,82 @@ impl<R> WritePolicyRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn id_is_value_1001(self) -> Self {
-        self.with_id_is("1001")
-    }
-
     pub fn with_id_is_value_1001(self) -> Self {
         self.with_id_is("1001")
     }
 
-
-
     pub fn with_id_is_not_value_1001(self) -> Self {
         self.with_id_is_not("1001")
-    }
-
-
-    pub fn id_is_value_1002(self) -> Self {
-        self.with_id_is("1002")
     }
 
     pub fn with_id_is_value_1002(self) -> Self {
         self.with_id_is("1002")
     }
 
-
-
     pub fn with_id_is_not_value_1002(self) -> Self {
         self.with_id_is_not("1002")
-    }
-
-
-    pub fn id_is_value_1003(self) -> Self {
-        self.with_id_is("1003")
     }
 
     pub fn with_id_is_value_1003(self) -> Self {
         self.with_id_is("1003")
     }
 
-
-
     pub fn with_id_is_not_value_1003(self) -> Self {
         self.with_id_is_not("1003")
-    }
-
-
-
-    pub fn name_is_allow_write(self) -> Self {
-        self.with_name_is("Allow Write")
     }
 
     pub fn with_name_is_allow_write(self) -> Self {
         self.with_name_is("Allow Write")
     }
 
-
-
     pub fn with_name_is_not_allow_write(self) -> Self {
         self.with_name_is_not("Allow Write")
-    }
-
-
-    pub fn name_is_allow_once(self) -> Self {
-        self.with_name_is("Allow Once")
     }
 
     pub fn with_name_is_allow_once(self) -> Self {
         self.with_name_is("Allow Once")
     }
 
-
-
     pub fn with_name_is_not_allow_once(self) -> Self {
         self.with_name_is_not("Allow Once")
-    }
-
-
-    pub fn name_is_read_only(self) -> Self {
-        self.with_name_is("Read Only")
     }
 
     pub fn with_name_is_read_only(self) -> Self {
         self.with_name_is("Read Only")
     }
 
-
-
     pub fn with_name_is_not_read_only(self) -> Self {
         self.with_name_is_not("Read Only")
-    }
-
-
-
-    pub fn code_is_allow_writ_e(self) -> Self {
-        self.with_code_is("ALLOW_WRITE")
     }
 
     pub fn with_code_is_allow_writ_e(self) -> Self {
         self.with_code_is("ALLOW_WRITE")
     }
 
-
-
     pub fn with_code_is_not_allow_writ_e(self) -> Self {
         self.with_code_is_not("ALLOW_WRITE")
-    }
-
-
-    pub fn code_is_allow_onc_e(self) -> Self {
-        self.with_code_is("ALLOW_ONCE")
     }
 
     pub fn with_code_is_allow_onc_e(self) -> Self {
         self.with_code_is("ALLOW_ONCE")
     }
 
-
-
     pub fn with_code_is_not_allow_onc_e(self) -> Self {
         self.with_code_is_not("ALLOW_ONCE")
-    }
-
-
-    pub fn code_is_read_onl_y(self) -> Self {
-        self.with_code_is("READ_ONLY")
     }
 
     pub fn with_code_is_read_onl_y(self) -> Self {
         self.with_code_is("READ_ONLY")
     }
 
-
-
     pub fn with_code_is_not_read_onl_y(self) -> Self {
         self.with_code_is_not("READ_ONLY")
     }
 
-
-
-
     pub fn filter_by_platform(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("platform_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("platform_id", value.entity_id_value()));
         self
     }
 
@@ -1643,10 +1617,10 @@ impl<R> WritePolicyRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn without_platform_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -1656,10 +1630,10 @@ impl<R> WritePolicyRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn have_platform(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("platform_id"));
@@ -1670,7 +1644,6 @@ impl<R> WritePolicyRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("platform_id"));
         self
     }
-
 
     pub fn group_by_platform(self) -> Self {
         self.group_by("platform_id")
@@ -1712,7 +1685,6 @@ impl<R> WritePolicyRequest<R> {
         self.group_by_platform_with(request)
     }
 
-
     pub fn roll_up_to_platform(self) -> Self {
         self.roll_up_to_platform_with(crate::Q::platforms().unlimited())
     }
@@ -1733,7 +1705,9 @@ impl<R> WritePolicyRequest<R> {
 
     pub fn unselect_platform(mut self) -> Self {
         self.query.projection.retain(|field| field != "platform_id");
-        self.query.relations.retain(|relation| relation.name != "platform");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "platform");
         self
     }
     pub fn select_platform(mut self) -> Self {
@@ -1743,12 +1717,17 @@ impl<R> WritePolicyRequest<R> {
 
     pub fn select_platform_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("platform", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("platform", selection));
+        self.query = self
+            .query
+            .relation_query("platform", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_platform_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_platform_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_platform_as_with_options(facet_name, request, true)
     }
 
@@ -1767,14 +1746,21 @@ impl<R> WritePolicyRequest<R> {
         self
     }
     pub fn have_repository_configurations(self) -> Self {
-        self.with_repository_configuration_list_matching(SelectQuery::new("RepositoryConfiguration"))
+        self.with_repository_configuration_list_matching(
+            crate::Q::repository_configurations_minimal(),
+        )
     }
 
     pub fn have_no_repository_configurations(self) -> Self {
-        self.without_repository_configuration_list_matching(SelectQuery::new("RepositoryConfiguration"))
+        self.without_repository_configuration_list_matching(
+            crate::Q::repository_configurations_minimal(),
+        )
     }
 
-    pub fn with_repository_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn with_repository_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::in_subquery(
             "id",
@@ -1782,11 +1768,17 @@ impl<R> WritePolicyRequest<R> {
             selection.query.clone(),
             "write_policy_id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "repository_configuration_list",
+            selection,
+        ));
         self
     }
 
-    pub fn without_repository_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_repository_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -1794,7 +1786,10 @@ impl<R> WritePolicyRequest<R> {
             selection.query.clone(),
             "write_policy_id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "repository_configuration_list",
+            selection,
+        ));
         self
     }
 
@@ -1803,28 +1798,41 @@ impl<R> WritePolicyRequest<R> {
         self
     }
 
-    pub fn select_repository_configuration_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn select_repository_configuration_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("repository_configuration_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("repository_configuration_list", selection));
+        self.query = self
+            .query
+            .relation_query("repository_configuration_list", selection.into_query());
         self
-}
+    }
     pub fn count_repository_configurations(self) -> Self {
         self.count_repository_configurations_as("count_repository_configurations")
     }
 
     pub fn count_repository_configurations_as(self, alias: impl Into<String>) -> Self {
-        self.count_repository_configurations_with(alias, crate::Q::repository_configurations().unlimited())
+        self.count_repository_configurations_with(
+            alias,
+            crate::Q::repository_configurations().unlimited(),
+        )
     }
 
-    pub fn count_repository_configurations_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_repository_configurations_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "repository_configuration_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -1832,23 +1840,46 @@ impl<R> WritePolicyRequest<R> {
         self.stats_from_repository_configurations_as("refinements", request)
     }
 
-    pub fn stats_from_repository_configurations_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_repository_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "repository_configuration_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                false,
+            ));
         self
     }
 
-    pub fn group_by_repository_configurations_with_details(self, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_repository_configurations(request)
+    fn scalar_from_repository_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
     }
 
-
-
+    pub fn group_by_repository_configurations_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_repository_configurations(request)
+    }
 }
 
 impl<R> Default for WritePolicyRequest<R> {
@@ -1857,13 +1888,13 @@ impl<R> Default for WritePolicyRequest<R> {
     }
 }
 
-impl<R> From< WritePolicyRequest<R> > for SelectQuery {
+impl<R> From<WritePolicyRequest<R>> for SelectQuery {
     fn from(request: WritePolicyRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< WritePolicyRequest<R> > for QuerySelection {
+impl<R> From<WritePolicyRequest<R>> for QuerySelection {
     fn from(request: WritePolicyRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -1875,14 +1906,19 @@ impl<R> From< WritePolicyRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::WritePolicy> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::WritePolicy>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::WritePolicyRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::WritePolicy;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -1895,98 +1931,166 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<WritePolicyRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::WritePolicy
+    pub fn new_entity<C>(&self, context: &C) -> crate::WritePolicy
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::WritePolicy::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::WritePolicy::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity =
+            crate::WritePolicy::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::WritePolicy::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> WritePolicyRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::WritePolicyRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

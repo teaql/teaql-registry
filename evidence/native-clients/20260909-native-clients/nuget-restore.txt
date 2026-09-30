@@ -1,0 +1,3 @@
+  Determining projects to restore...
+/tmp/teaql-registry-native.B7lJ0k/nuget/consumer/TeaQL.Native.Consumer.csproj : warning NU1803: You are running the 'restore' operation with an 'HTTP' source, 'http://127.0.0.1:18083/repository/nuget-hosted/v3/index.json'. Non-HTTPS access will be removed in a future version. Consider migrating to an 'HTTPS' source.
+  Restored /tmp/teaql-registry-native.B7lJ0k/nuget/consumer/TeaQL.Native.Consumer.csproj (in 558 ms).

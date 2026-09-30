@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const DOCKER_MANIFEST_V2_MEDIA_TYPE: &str = "application/vnd.docker.distribution.manifest.v2+json";
+pub const DOCKER_MANIFEST_V2_MEDIA_TYPE: &str =
+    "application/vnd.docker.distribution.manifest.v2+json";
 pub const OCI_MANIFEST_V1_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
 pub const DOCKER_CONFIG_JSON_MEDIA_TYPE: &str = "application/vnd.docker.container.image.v1+json";
 pub const OCI_CONFIG_JSON_MEDIA_TYPE: &str = "application/vnd.oci.image.config.v1+json";
@@ -97,13 +98,15 @@ pub fn parse_docker_path(path: &str) -> Option<DockerPath> {
     }
 
     // Check blobs uploads init: <name>/blobs/uploads
-    if parts.len() >= 3 && parts[parts.len() - 2] == "blobs" && parts[parts.len() - 1] == "uploads" {
+    if parts.len() >= 3 && parts[parts.len() - 2] == "blobs" && parts[parts.len() - 1] == "uploads"
+    {
         let name = parts[0..parts.len() - 2].join("/");
         return Some(DockerPath::BlobsUploadInit { name });
     }
 
     // Check blobs upload chunk/finish: <name>/blobs/uploads/<uuid>
-    if parts.len() >= 4 && parts[parts.len() - 3] == "blobs" && parts[parts.len() - 2] == "uploads" {
+    if parts.len() >= 4 && parts[parts.len() - 3] == "blobs" && parts[parts.len() - 2] == "uploads"
+    {
         let name = parts[0..parts.len() - 3].join("/");
         let uuid = parts[parts.len() - 1].to_string();
         return Some(DockerPath::BlobsUploadChunk { name, uuid });

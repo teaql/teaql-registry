@@ -12,7 +12,10 @@ pub struct BlobStoreManager {
 impl BlobStoreManager {
     pub fn new(default_store: Arc<dyn BlobStore>) -> Self {
         let mut map = HashMap::new();
-        map.insert(default_store.store_name().to_string(), default_store.clone());
+        map.insert(
+            default_store.store_name().to_string(),
+            default_store.clone(),
+        );
         Self {
             default_store,
             stores: Arc::new(RwLock::new(map)),
@@ -24,12 +27,12 @@ impl BlobStoreManager {
     }
 
     pub fn register(&self, store: Arc<dyn BlobStore>) {
-        let mut map = self.stores.write().unwrap();
+        let mut map = self.stores.write().expect("lock poisoned");
         map.insert(store.store_name().to_string(), store);
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn BlobStore>> {
-        let map = self.stores.read().unwrap();
+        let map = self.stores.read().expect("lock poisoned");
         map.get(name).cloned().or_else(|| {
             if name == "default" {
                 Some(self.default_store.clone())

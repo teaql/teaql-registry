@@ -1,10 +1,9 @@
-
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait BlobStoreConfigurationCheckerLogic: Send + Sync {
     fn check_and_fix_blob_store_configuration(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::BlobStoreConfiguration,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -20,7 +19,9 @@ pub trait BlobStoreConfigurationCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if !value {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -32,7 +33,9 @@ pub trait BlobStoreConfigurationCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.is_none() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -44,7 +47,9 @@ pub trait BlobStoreConfigurationCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.trim().is_empty() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -116,13 +121,85 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::BlobStoreConfiguration,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("tenant_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("tenant"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("name") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("name"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("blob_store_type_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("blob_store_type"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("path") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("path"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("total_size") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("total_size"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("blob_count") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("blob_count"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
         self.logic
-            .check_and_fix_blob_store_configuration(ctx, entity, status, location, results);
+            .check_and_fix_blob_store_configuration(context, entity, status, location, results);
     }
 }

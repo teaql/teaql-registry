@@ -1,10 +1,9 @@
-
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait SecurityUserCheckerLogic: Send + Sync {
     fn check_and_fix_security_user(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::SecurityUser,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -20,7 +19,9 @@ pub trait SecurityUserCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if !value {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -32,7 +33,9 @@ pub trait SecurityUserCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.is_none() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -44,7 +47,9 @@ pub trait SecurityUserCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.trim().is_empty() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -116,13 +121,94 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::SecurityUser,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("tenant_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("tenant"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("username") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("username"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("first_name") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("first_name"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("last_name") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("last_name"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("password_hash") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("password_hash"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("user_status_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("user_status"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("email") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("email"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
         self.logic
-            .check_and_fix_security_user(ctx, entity, status, location, results);
+            .check_and_fix_security_user(context, entity, status, location, results);
     }
 }

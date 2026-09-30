@@ -39,11 +39,13 @@ impl GroupEngine {
 
         for member in members {
             if member.recipe_name().contains("hosted") {
-                if let Ok(Some(res)) = HostedEngine::handle_get(ctx, &member, blobstore, path).await {
+                if let Ok(Some(res)) = HostedEngine::handle_get(ctx, &member, blobstore, path).await
+                {
                     return Ok(Some(res));
                 }
             } else if member.recipe_name().contains("proxy") {
-                if let Ok(Some(res)) = ProxyEngine::handle_get(ctx, &member, blobstore, path).await {
+                if let Ok(Some(res)) = ProxyEngine::handle_get(ctx, &member, blobstore, path).await
+                {
                     return Ok(Some(res));
                 }
             }

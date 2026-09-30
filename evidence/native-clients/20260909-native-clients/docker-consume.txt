@@ -1,0 +1,8 @@
+native-probe-20260909-native-clients: Pulling from docker-hosted
+f30bbe111bb4: Pulling fs layer
+f30bbe111bb4: Verifying Checksum
+f30bbe111bb4: Download complete
+f30bbe111bb4: Pull complete
+Digest: sha256:f299bf2d670d434786d65cd0d34ba25e561f2623cfd3404fd2dc62f71b0ee7e5
+Status: Downloaded newer image for 127.0.0.1:18083/docker-hosted:native-probe-20260909-native-clients
+127.0.0.1:18083/docker-hosted:native-probe-20260909-native-clients

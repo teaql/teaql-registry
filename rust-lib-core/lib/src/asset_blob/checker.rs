@@ -1,10 +1,9 @@
-
 use teaql_runtime::{CheckObjectStatus, CheckResults, ObjectLocation, TypedChecker, UserContext};
 
 pub trait AssetBlobCheckerLogic: Send + Sync {
     fn check_and_fix_asset_blob(
         &self,
-        _ctx: &UserContext,
+        _context: &UserContext,
         _entity: &mut crate::AssetBlob,
         _status: CheckObjectStatus,
         _location: &ObjectLocation,
@@ -20,7 +19,9 @@ pub trait AssetBlobCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if !value {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -32,7 +33,9 @@ pub trait AssetBlobCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.is_none() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -44,7 +47,9 @@ pub trait AssetBlobCheckerLogic: Send + Sync {
         results: &mut CheckResults,
     ) {
         if value.trim().is_empty() {
-            results.push(teaql_runtime::CheckResult::required(location.clone().member(field)));
+            results.push(teaql_runtime::CheckResult::required(
+                location.clone().member(field),
+            ));
         }
     }
 
@@ -116,13 +121,94 @@ where
 {
     fn check_and_fix_typed(
         &self,
-        ctx: &UserContext,
+        context: &UserContext,
         entity: &mut crate::AssetBlob,
         status: CheckObjectStatus,
         location: &ObjectLocation,
         results: &mut CheckResults,
     ) {
+        if status.is_update() && !entity.is_loaded("id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("id"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("blob_store_id") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("blob_store"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("blob_ref") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("blob_ref"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("blob_size") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("blob_size"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("content_type") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("content_type"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("sha1_checksum") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("sha1_checksum"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("sha256_checksum") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("sha256_checksum"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("md5_checksum") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("md5_checksum"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
+        if status.is_update() && !entity.is_loaded("version") {
+            results.push(
+                teaql_runtime::CheckResult::new(
+                    teaql_runtime::CheckRule::InvalidType,
+                    location.clone().member("version"),
+                )
+                .with_message("Mutation requires a fully loaded entity"),
+            );
+        }
         self.logic
-            .check_and_fix_asset_blob(ctx, entity, status, location, results);
+            .check_and_fix_asset_blob(context, entity, status, location, results);
     }
 }

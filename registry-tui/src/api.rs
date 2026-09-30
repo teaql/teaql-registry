@@ -1,10 +1,25 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use reqwest::Client;
 use std::time::Duration;
 
 use crate::types::{
     CleanupReport, CreateTokenResponse, GcReport, RepositoryItem, SearchResponse, ServerOverview,
 };
+
+/// Trait abstracting all registry API calls.
+/// Implement this trait for mock clients in tests.
+#[async_trait]
+pub trait RegistryApi: Send + Sync {
+    async fn fetch_overview(&self) -> Result<ServerOverview>;
+    async fn fetch_repositories(&self) -> Result<Vec<RepositoryItem>>;
+    async fn search_components(&self, keyword: &str) -> Result<SearchResponse>;
+    async fn fetch_metrics(&self) -> Result<String>;
+    async fn run_gc(&self) -> Result<GcReport>;
+    async fn run_cleanup(&self, repo_name: &str, max_versions: usize) -> Result<CleanupReport>;
+    async fn create_temp_token(&self, description: &str) -> Result<String>;
+    async fn verify_connection(&self) -> Result<bool>;
+}
 
 pub struct RegistryClient {
     client: Client,
@@ -13,7 +28,12 @@ pub struct RegistryClient {
 }
 
 impl RegistryClient {
-    pub fn new(endpoint: &str, username: Option<&str>, password: Option<&str>, token: Option<&str>) -> Self {
+    pub fn new(
+        endpoint: &str,
+        username: Option<&str>,
+        password: Option<&str>,
+        token: Option<&str>,
+    ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -45,8 +65,11 @@ impl RegistryClient {
             req
         }
     }
+}
 
-    pub async fn fetch_overview(&self) -> Result<ServerOverview> {
+#[async_trait]
+impl RegistryApi for RegistryClient {
+    async fn fetch_overview(&self) -> Result<ServerOverview> {
         let status_url = format!("{}/service/rest/v1/status", self.endpoint);
         let is_online = match self.client.get(&status_url).send().await {
             Ok(resp) => resp.status().is_success(),
@@ -71,7 +94,7 @@ impl RegistryClient {
         }
 
         let mut format_counts: Vec<(String, usize)> = fmt_map.into_iter().collect();
-        format_counts.sort_by(|a, b| b.1.cmp(&a.1));
+        format_counts.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         let search = self.search_components("").await.unwrap_or_default();
         let total_components = search.total;
@@ -79,7 +102,11 @@ impl RegistryClient {
         let metrics_raw = self.fetch_metrics().await.unwrap_or_default();
 
         Ok(ServerOverview {
-            status: if is_online { "HEALTHY / ONLINE".to_string() } else { "OFFLINE".to_string() },
+            status: if is_online {
+                "HEALTHY / ONLINE".to_string()
+            } else {
+                "OFFLINE".to_string()
+            },
             is_online,
             total_repositories,
             hosted_count,
@@ -91,7 +118,7 @@ impl RegistryClient {
         })
     }
 
-    pub async fn fetch_repositories(&self) -> Result<Vec<RepositoryItem>> {
+    async fn fetch_repositories(&self) -> Result<Vec<RepositoryItem>> {
         let url = format!("{}/service/rest/v1/repositories", self.endpoint);
         let req = self.apply_auth(self.client.get(&url));
         let resp = req.send().await.context("Failed to connect to registry")?;
@@ -99,7 +126,7 @@ impl RegistryClient {
         Ok(repos)
     }
 
-    pub async fn search_components(&self, keyword: &str) -> Result<SearchResponse> {
+    async fn search_components(&self, keyword: &str) -> Result<SearchResponse> {
         let url = if keyword.is_empty() {
             format!("{}/service/rest/v1/search?page_size=50", self.endpoint)
         } else {
@@ -115,7 +142,7 @@ impl RegistryClient {
         Ok(search)
     }
 
-    pub async fn fetch_metrics(&self) -> Result<String> {
+    async fn fetch_metrics(&self) -> Result<String> {
         let url = format!("{}/metrics", self.endpoint);
         let req = self.apply_auth(self.client.get(&url));
         let resp = req.send().await.context("Failed to fetch metrics")?;
@@ -123,7 +150,7 @@ impl RegistryClient {
         Ok(text)
     }
 
-    pub async fn run_gc(&self) -> Result<GcReport> {
+    async fn run_gc(&self) -> Result<GcReport> {
         let url = format!("{}/service/rest/v1/gc/run", self.endpoint);
         let req = self.apply_auth(self.client.post(&url));
         let resp = req.send().await.context("GC failed")?;
@@ -131,7 +158,7 @@ impl RegistryClient {
         Ok(report)
     }
 
-    pub async fn run_cleanup(&self, repo_name: &str, max_versions: usize) -> Result<CleanupReport> {
+    async fn run_cleanup(&self, repo_name: &str, max_versions: usize) -> Result<CleanupReport> {
         let url = format!("{}/service/rest/v1/cleanup/run", self.endpoint);
         let body = serde_json::json!({
             "repository": repo_name,
@@ -144,18 +171,33 @@ impl RegistryClient {
         Ok(report)
     }
 
-    pub async fn create_temp_token(&self, description: &str) -> Result<String> {
+    async fn create_temp_token(&self, description: &str) -> Result<String> {
         let url = format!("{}/service/rest/v1/tokens", self.endpoint);
         let body = serde_json::json!({
-            "username": "admin",
             "description": description,
-            "scopes": ["read", "write", "admin"],
+            "scopes": ["repository:read", "repository:write"],
             "expires_in_days": 7
         });
         let req = self.apply_auth(self.client.post(&url).json(&body));
         let resp = req.send().await.context("Create token failed")?;
         let token_resp = resp.json::<CreateTokenResponse>().await?;
         Ok(token_resp.token)
+    }
+
+    async fn verify_connection(&self) -> Result<bool> {
+        let url = format!("{}/service/rest/v1/repositories", self.endpoint);
+        let req = self.apply_auth(self.client.get(&url));
+        let resp = req.send().await.context("Cannot reach registry")?;
+        let status = resp.status();
+        if status.is_success() {
+            Ok(true)
+        } else if status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN
+        {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
     }
 }
 

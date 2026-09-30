@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use teaql_registry::format::docker::{
     compute_sha256_digest, is_valid_digest, parse_docker_path, DockerDescriptor, DockerManifestV2,
     DockerPath, DOCKER_CONFIG_JSON_MEDIA_TYPE, DOCKER_LAYER_GZIP_MEDIA_TYPE,

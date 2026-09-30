@@ -1,29 +1,40 @@
+#![recursion_limit = "256"]
+
+use sha2::{Digest, Sha512};
+use std::collections::HashSet;
 use teaql_registry::security::{
     auth::parse_basic_auth,
     password::{hash_password, verify_password},
     rbac::RbacChecker,
 };
-use std::collections::HashSet;
 
 #[test]
 fn test_password_hash_and_verify() {
     let plain = "Secr3tP@ssword!";
     let hashed = hash_password(plain);
 
-    assert!(hashed.starts_with("sha512$"));
+    assert!(hashed.starts_with("$argon2"));
     assert!(verify_password(plain, &hashed));
     assert!(!verify_password("wrong_password", &hashed));
 }
 
 #[test]
-fn test_password_shiro_compatibility() {
-    assert!(verify_password("admin123", "$shiro1$SHA-512$something$hash"));
-    assert!(!verify_password("wrongadmin", "$shiro1$SHA-512$something$hash"));
+fn test_password_legacy_sha512_migration_compatibility() {
+    let legacy = format!(
+        "sha512${}",
+        hex::encode(Sha512::digest(b"Old-Registry-Passphrase"))
+    );
+    assert!(verify_password("Old-Registry-Passphrase", &legacy));
+    assert!(!verify_password("wrong-password", &legacy));
+    assert!(!verify_password(
+        "admin123",
+        "$shiro1$SHA-512$something$hash"
+    ));
 }
 
 #[test]
 fn test_password_empty() {
-    assert!(verify_password("", ""));
+    assert!(!verify_password("", ""));
     assert!(!verify_password("admin", ""));
 }
 

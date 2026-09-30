@@ -5,6 +5,8 @@ use serde_json::Value;
 pub struct CargoIndexConfig {
     pub dl: String,
     pub api: String,
+    #[serde(rename = "auth-required")]
+    pub auth_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +70,7 @@ fn default_true() -> bool {
 }
 
 impl CargoIndexRecord {
-    /// Cargo publish metadata and sparse-index dependency records differ.
+    /// The publish API and sparse-index dependency formats are not identical.
     pub fn from_publish_metadata(metadata: &Value, checksum: String) -> anyhow::Result<Self> {
         let published: CargoPublishMetadata = serde_json::from_value(metadata.clone())?;
         anyhow::ensure!(
@@ -131,33 +133,56 @@ mod tests {
         let metadata = serde_json::json!({
             "name": "teaql-core",
             "vers": "4.3.6",
-            "deps": [{
-                "name": "teaql-macros",
-                "version_req": "^4.3.6",
-                "features": ["derive"],
-                "optional": true,
-                "default_features": false,
-                "target": "cfg(unix)",
-                "kind": "dev",
-                "registry": null,
-                "explicit_name_in_toml": "macros"
-            }],
+            "deps": [
+                {
+                    "name": "serde",
+                    "version_req": "^1",
+                    "features": ["derive"],
+                    "optional": false,
+                    "default_features": true,
+                    "target": null,
+                    "kind": "normal",
+                    "registry": "https://github.com/rust-lang/crates.io-index",
+                    "explicit_name_in_toml": null
+                },
+                {
+                    "name": "teaql-macros",
+                    "version_req": "^4.3.6",
+                    "features": [],
+                    "optional": true,
+                    "default_features": false,
+                    "target": "cfg(unix)",
+                    "kind": "dev",
+                    "registry": null,
+                    "explicit_name_in_toml": "macros"
+                }
+            ],
             "features": {"derive": ["dep:teaql-macros"]}
         });
         let record = CargoIndexRecord::from_publish_metadata(&metadata, "abc123".into()).unwrap();
         assert_eq!(record.v, 2);
-        assert_eq!(record.deps[0].name, "macros");
-        assert_eq!(record.deps[0].package.as_deref(), Some("teaql-macros"));
-        assert_eq!(record.deps[0].req, "^4.3.6");
-        assert_eq!(record.deps[0].kind, "dev");
-        assert_eq!(record.deps[0].target.as_deref(), Some("cfg(unix)"));
+        assert_eq!(record.cksum, "abc123");
         assert_eq!(record.features["derive"][0], "dep:teaql-macros");
+        assert_eq!(record.deps[0].name, "serde");
+        assert_eq!(record.deps[0].req, "^1");
+        assert_eq!(record.deps[0].features, ["derive"]);
+        assert_eq!(
+            record.deps[0].registry.as_deref(),
+            Some("https://github.com/rust-lang/crates.io-index")
+        );
+        assert_eq!(record.deps[1].name, "macros");
+        assert_eq!(record.deps[1].package.as_deref(), Some("teaql-macros"));
+        assert_eq!(record.deps[1].kind, "dev");
+        assert_eq!(record.deps[1].target.as_deref(), Some("cfg(unix)"));
     }
 
     #[test]
-    fn malformed_features_do_not_become_an_empty_valid_index() {
+    fn malformed_publish_features_do_not_become_an_empty_valid_index() {
         let metadata = serde_json::json!({
-            "name": "teaql-core", "vers": "4.3.6", "deps": [], "features": []
+            "name": "teaql-core",
+            "vers": "4.3.6",
+            "deps": [],
+            "features": []
         });
         assert!(CargoIndexRecord::from_publish_metadata(&metadata, "abc123".into()).is_err());
     }

@@ -1,8 +1,7 @@
-
 // ⛔ AI agents: DO NOT read this file for API discovery. Instead run: cargo teaql --input modeling/MODEL.xml rust-assist-query/component
 use std::collections::BTreeMap;
 
-use teaql_macros::TeaqlEntity;
+use teaql_macros::{teaql_entity, TeaqlEntity};
 
 /// [TEAQL AI WARNING]
 /// TeaQL was explicitly designed to PREVENT AI hallucinations and random guessing.
@@ -10,38 +9,45 @@ use teaql_macros::TeaqlEntity;
 /// The methods listed below are the ONLY valid ways to interact with this entity.
 /// If you encounter compilation errors (e.g., method not found), DO NOT guess another method name.
 /// Read the method signatures in this file before proceeding.
+#[teaql_entity]
 #[derive(Clone, Debug, PartialEq, TeaqlEntity)]
-#[teaql(entity = "Component", table = "component_data", data_service = "postgres")]
+#[teaql(
+    entity = "Component",
+    table = "component_data",
+    data_service = "postgres"
+)]
 pub struct Component {
-#[teaql(id)]
+    #[teaql(id)]
     id: u64,
 
-// @source model.xml:144
+    // @source model.xml:146
     namespace: String,
 
-// @source model.xml:144
+    // @source model.xml:146
     name: String,
 
-// @source model.xml:144
+    // @source model.xml:146
     version_name: String,
 
-// @source model.xml:144
+    // @source model.xml:146
     normalized_version: String,
 
-// @source model.xml:144
+    // @source model.xml:146
     kind: String,
-#[teaql(version)]
+    #[teaql(version)]
     version: i64,
-// @source model.xml:144
-#[teaql(column = "content_repository")]
+    // @source model.xml:146
+    #[teaql(column = "content_repository")]
     content_repository_id: u64,
-// @source model.xml:144
-#[teaql(relation(target = "ContentRepository", local_key = "content_repository_id", foreign_key = "id"))]
-    content_repository: Option<crate::ContentRepository>,
+    // @source model.xml:146
+    #[teaql(relation(
+        target = "ContentRepository",
+        local_key = "content_repository_id",
+        foreign_key = "id"
+    ))]
+    content_repository: Option<Box<crate::ContentRepository>>,
     #[teaql(dynamic)]
     dynamic: BTreeMap<String, teaql_core::Value>,
-    #[teaql(skip)]
-    root: teaql_runtime::EntityRoot,
     #[teaql(skip)]
     pub __load_state: teaql_core::eval::LoadState,
 }
@@ -53,7 +59,7 @@ impl Component {
         teaql_core::Value::U64(id)
     }
 
-    pub(crate) fn runtime_new(root: teaql_runtime::EntityRoot) -> Self {
+    pub(crate) fn runtime_new(root: teaql_runtime::EntityRuntimeState) -> Self {
         Self {
             id: 0_u64,
             namespace: String::new(),
@@ -65,19 +71,16 @@ impl Component {
             content_repository_id: 0_u64,
             content_repository: None,
             dynamic: BTreeMap::new(),
-            root,
+            __teaql_runtime_state: root,
             __load_state: teaql_core::eval::LoadState::FullyLoaded,
         }
     }
 
-    pub fn entity_key(&self) -> teaql_runtime::EntityKey {
-        teaql_runtime::EntityKey::new("Component", self.id)
-    }
-
-    pub fn attach_root_recursive(&mut self, root: teaql_runtime::EntityRoot) {
-        self.root = root.clone();
+    pub fn attach_runtime_state_recursive(&mut self, root: teaql_runtime::EntityRuntimeState) {
+        root.adopt_mutations_from(self.__teaql_runtime_state());
+        self.__teaql_replace_runtime_state(root.clone());
         if let Some(entity) = &mut self.content_repository {
-            entity.attach_root_recursive(root.clone());
+            entity.attach_runtime_state_recursive(root.clone());
         }
     }
 
@@ -90,202 +93,277 @@ impl Component {
     }
 
     pub fn id(&self) -> u64 {
-        self.changed_id().and_then(|value| value.try_u64()).unwrap_or(self.id)
+        self.changed_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.id)
     }
 
     pub fn update_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.id = value.try_u64().unwrap_or(self.id.clone());
-        self.root.set(self.entity_key(), "id", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "id", value);
         self
     }
 
     pub fn changed_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "id")
+        self.__teaql_runtime_state().get(&self.entity_key(), "id")
     }
 
     pub fn eval_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "id".to_string(), attempted_path: "id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.id())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "id".to_string(),
+                attempted_path: "id".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.id())
+        }
+    }
 
     pub fn namespace(&self) -> String {
-        self.changed_namespace().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.namespace.clone())
+        self.changed_namespace()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.namespace.clone())
     }
 
     pub fn update_namespace(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.namespace = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.namespace.clone());
-        self.root.set(self.entity_key(), "namespace", value);
+        self.namespace = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.namespace.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "namespace", value);
         self
     }
 
     pub fn changed_namespace(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "namespace")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "namespace")
     }
 
     pub fn eval_namespace(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("namespace") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "namespace".to_string(), attempted_path: "namespace".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.namespace())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "namespace".to_string(),
+                attempted_path: "namespace".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.namespace())
+        }
+    }
 
     pub fn name(&self) -> String {
-        self.changed_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.name.clone())
+        self.changed_name()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.name.clone())
     }
 
     pub fn update_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.name.clone());
-        self.root.set(self.entity_key(), "name", value);
+        self.name = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.name.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "name", value);
         self
     }
 
     pub fn changed_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "name")
+        self.__teaql_runtime_state().get(&self.entity_key(), "name")
     }
 
     pub fn eval_name(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("name") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "name".to_string(), attempted_path: "name".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.name())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "name".to_string(),
+                attempted_path: "name".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.name())
+        }
+    }
 
     pub fn version_name(&self) -> String {
-        self.changed_version_name().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.version_name.clone())
+        self.changed_version_name()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.version_name.clone())
     }
 
     pub fn update_version_name(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.version_name = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.version_name.clone());
-        self.root.set(self.entity_key(), "version_name", value);
+        self.version_name = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.version_name.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "version_name", value);
         self
     }
 
     pub fn changed_version_name(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "version_name")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "version_name")
     }
 
     pub fn eval_version_name(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("version_name") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "version_name".to_string(), attempted_path: "version_name".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.version_name())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "version_name".to_string(),
+                attempted_path: "version_name".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.version_name())
+        }
+    }
 
     pub fn normalized_version(&self) -> String {
-        self.changed_normalized_version().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.normalized_version.clone())
+        self.changed_normalized_version()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.normalized_version.clone())
     }
 
     pub fn update_normalized_version(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.normalized_version = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.normalized_version.clone());
-        self.root.set(self.entity_key(), "normalized_version", value);
+        self.normalized_version = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.normalized_version.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "normalized_version", value);
         self
     }
 
     pub fn changed_normalized_version(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "normalized_version")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "normalized_version")
     }
 
     pub fn eval_normalized_version(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("normalized_version") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "normalized_version".to_string(), attempted_path: "normalized_version".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.normalized_version())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "normalized_version".to_string(),
+                attempted_path: "normalized_version".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.normalized_version())
+        }
+    }
 
     pub fn kind(&self) -> String {
-        self.changed_kind().and_then(|value| value.try_text().map(|value| value.to_owned())).unwrap_or_else(|| self.kind.clone())
+        self.changed_kind()
+            .and_then(|value| value.try_text().map(|value| value.to_owned()))
+            .unwrap_or_else(|| self.kind.clone())
     }
 
     pub fn update_kind(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
-        self.kind = value.try_text().map(|value| value.trim().to_owned()).unwrap_or_else(|| self.kind.clone());
-        self.root.set(self.entity_key(), "kind", value);
+        self.kind = value
+            .try_text()
+            .map(|value| value.trim().to_owned())
+            .unwrap_or_else(|| self.kind.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "kind", value);
         self
     }
 
     pub fn changed_kind(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "kind")
+        self.__teaql_runtime_state().get(&self.entity_key(), "kind")
     }
 
     pub fn eval_kind(&self) -> teaql_core::eval::EvalResult<String> {
         if !self.is_loaded("kind") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "kind".to_string(), attempted_path: "kind".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.kind())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "kind".to_string(),
+                attempted_path: "kind".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.kind())
+        }
+    }
 
     pub fn version(&self) -> i64 {
-        self.changed_version().and_then(|value| value.try_i64()).unwrap_or(self.version)
+        self.changed_version()
+            .and_then(|value| value.try_i64())
+            .unwrap_or(self.version)
     }
 
     pub fn update_version(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
         let value = value.into();
         self.version = value.try_i64().unwrap_or(self.version.clone());
-        self.root.set(self.entity_key(), "version", value);
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "version", value);
         self
     }
 
     pub fn changed_version(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "version")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "version")
     }
 
     pub fn eval_version(&self) -> teaql_core::eval::EvalResult<i64> {
         if !self.is_loaded("version") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "version".to_string(), attempted_path: "version".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.version())
-                }}
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "version".to_string(),
+                attempted_path: "version".to_string(),
+            }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.version())
+        }
+    }
     pub fn content_repository_id(&self) -> u64 {
-        self.changed_content_repository_id().and_then(|value| value.try_u64()).unwrap_or(self.content_repository_id)
+        self.changed_content_repository_id()
+            .and_then(|value| value.try_u64())
+            .unwrap_or(self.content_repository_id)
     }
 
-    pub fn update_content_repository_id(&mut self, value: impl Into<teaql_core::Value>) -> &mut Self {
+    pub fn update_content_repository_id(
+        &mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> &mut Self {
         let value = value.into();
-        self.content_repository_id = value.try_u64().unwrap_or(self.content_repository_id.clone());
-        self.root.set(self.entity_key(), "content_repository_id", value);
+        self.content_repository_id = value
+            .try_u64()
+            .unwrap_or(self.content_repository_id.clone());
+        self.__teaql_runtime_state()
+            .set(self.entity_key(), "content_repository_id", value);
         self
     }
 
     pub fn changed_content_repository_id(&self) -> Option<teaql_core::Value> {
-        self.root.get(&self.entity_key(), "content_repository_id")
+        self.__teaql_runtime_state()
+            .get(&self.entity_key(), "content_repository_id")
     }
 
     pub fn eval_content_repository_id(&self) -> teaql_core::eval::EvalResult<u64> {
         if !self.is_loaded("content_repository_id") {
-                    teaql_core::eval::EvalResult::NotLoaded { failed_node: "content_repository_id".to_string(), attempted_path: "content_repository_id".to_string() }
-                } else {
-                    teaql_core::eval::EvalResult::Value(self.content_repository_id())
-                }}
-    pub fn content_repository(&self) -> Option<&crate::ContentRepository> {
-        self.content_repository.as_ref()
-    }
-
-    pub fn eval_content_repository(&self) -> teaql_core::eval::EvalResult<&crate::ContentRepository> {
-        if !self.is_loaded("content_repository") {
-            teaql_core::eval::EvalResult::NotLoaded { failed_node: "content_repository".to_string(), attempted_path: "content_repository".to_string() }
-        } else {
-            match &self.content_repository {
-                Some(v) => teaql_core::eval::EvalResult::Value(v),
-                None => teaql_core::eval::EvalResult::Null,
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "content_repository_id".to_string(),
+                attempted_path: "content_repository_id".to_string(),
             }
+        } else {
+            teaql_core::eval::EvalResult::Value(self.content_repository_id())
         }
     }
-
-    pub fn mark_as_delete(&mut self) -> &mut Self {
-        self.root.mark_as_delete(self.entity_key());
-        self
+    pub fn content_repository(&self) -> Option<&crate::ContentRepository> {
+        self.content_repository.as_deref().or_else(|| {
+            self.__teaql_runtime_state()
+                .resolve_entity(self.content_repository_id())
+        })
     }
 
-    pub fn set_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.root.set_comment(comment);
-        self
+    pub fn eval_content_repository(
+        &self,
+    ) -> teaql_core::eval::EvalResult<&crate::ContentRepository> {
+        match self.content_repository() {
+            Some(v) => teaql_core::eval::EvalResult::Value(v),
+            None if self.is_loaded("content_repository") => teaql_core::eval::EvalResult::Null,
+            None => teaql_core::eval::EvalResult::NotLoaded {
+                failed_node: "content_repository".to_string(),
+                attempted_path: "content_repository".to_string(),
+            },
+        }
     }
 }
-

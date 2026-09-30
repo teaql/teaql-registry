@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -91,20 +91,19 @@ impl<R> BlobStoreTypeRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .blob_store_type_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +112,65 @@ impl<R> BlobStoreTypeRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        SmartList<teaql_core::CompactRow>,
+        TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .blob_store_type_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>,
+        TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .blob_store_type_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +181,8 @@ impl<R> BlobStoreTypeRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +190,30 @@ impl<R> BlobStoreTypeRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
@@ -187,23 +221,39 @@ impl<R> BlobStoreTypeRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .blob_store_type_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +265,21 @@ impl<R> BlobStoreTypeRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for BlobStoreType is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for BlobStoreType is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .blob_store_type_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +287,6 @@ impl<R> BlobStoreTypeRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .blob_store_type_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +342,11 @@ impl<R> BlobStoreTypeRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +356,12 @@ impl<R> BlobStoreTypeRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +378,6 @@ impl<R> BlobStoreTypeRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +398,9 @@ impl<R> BlobStoreTypeRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -494,18 +518,13 @@ impl<R> BlobStoreTypeRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "platform" => {
-                self.with_platform_matching(
-                    crate::Q::platforms_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "blob_store_configuration_list" => {
-                self.with_blob_store_configuration_list_matching(
-                    crate::Q::blob_store_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "platform" => self.with_platform_matching(
+                crate::Q::platforms_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "blob_store_configuration_list" => self.with_blob_store_configuration_list_matching(
+                crate::Q::blob_store_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -579,6 +598,31 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
+        self
+    }
+
     pub fn top(self, top_n: u64) -> Self {
         self.limit(top_n)
     }
@@ -647,12 +691,24 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -692,12 +748,20 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -728,7 +792,9 @@ impl<R> BlobStoreTypeRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -744,9 +810,7 @@ impl<R> BlobStoreTypeRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -799,7 +863,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -817,19 +880,13 @@ impl<R> BlobStoreTypeRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -840,10 +897,9 @@ impl<R> BlobStoreTypeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -851,10 +907,9 @@ impl<R> BlobStoreTypeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -877,7 +932,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_name(mut self) -> Self {
         self.query = self.query.project("name");
@@ -906,9 +960,7 @@ impl<R> BlobStoreTypeRequest<R> {
     pub fn group_by_name_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("name");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("name"));
+        request.query = request.query.project_expr(alias, Expr::column("name"));
         request
     }
 
@@ -963,10 +1015,11 @@ impl<R> BlobStoreTypeRequest<R> {
 
     pub fn unselect_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "name");
         self
     }
-
 
     pub fn with_name(
         mut self,
@@ -997,8 +1050,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("name", value));
         self
@@ -1009,7 +1060,10 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-    pub fn with_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("name", value));
         self
     }
@@ -1037,11 +1091,9 @@ impl<R> BlobStoreTypeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("name", range.start, range.end));
         self
     }
 
@@ -1049,10 +1101,9 @@ impl<R> BlobStoreTypeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "name",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("name", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1116,13 +1167,10 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("name"));
         self
     }
-
 
     pub fn order_by_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("name");
@@ -1143,7 +1191,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self.query = self.query.order_gbk_desc("name");
         self
     }
-
 
     pub fn select_code(mut self) -> Self {
         self.query = self.query.project("code");
@@ -1172,9 +1219,7 @@ impl<R> BlobStoreTypeRequest<R> {
     pub fn group_by_code_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("code");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("code"));
+        request.query = request.query.project_expr(alias, Expr::column("code"));
         request
     }
 
@@ -1229,10 +1274,11 @@ impl<R> BlobStoreTypeRequest<R> {
 
     pub fn unselect_code(mut self) -> Self {
         self.query.projection.retain(|field| field != "code");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "code");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "code");
         self
     }
-
 
     pub fn with_code(
         mut self,
@@ -1263,8 +1309,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("code", value));
         self
@@ -1275,7 +1319,10 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-    pub fn with_code_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_code_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("code", value));
         self
     }
@@ -1303,11 +1350,9 @@ impl<R> BlobStoreTypeRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "code",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("code", range.start, range.end));
         self
     }
 
@@ -1315,10 +1360,9 @@ impl<R> BlobStoreTypeRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "code",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("code", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1382,13 +1426,10 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("code"));
         self
     }
-
 
     pub fn order_by_code_asc(mut self) -> Self {
         self.query = self.query.order_asc("code");
@@ -1417,9 +1458,7 @@ impl<R> BlobStoreTypeRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -1491,102 +1530,58 @@ impl<R> BlobStoreTypeRequest<R> {
         self.query = self.query.order_gbk_desc("version");
         self
     }
-    pub fn id_is_value_1001(self) -> Self {
-        self.with_id_is("1001")
-    }
-
     pub fn with_id_is_value_1001(self) -> Self {
         self.with_id_is("1001")
     }
 
-
-
     pub fn with_id_is_not_value_1001(self) -> Self {
         self.with_id_is_not("1001")
-    }
-
-
-    pub fn id_is_value_1002(self) -> Self {
-        self.with_id_is("1002")
     }
 
     pub fn with_id_is_value_1002(self) -> Self {
         self.with_id_is("1002")
     }
 
-
-
     pub fn with_id_is_not_value_1002(self) -> Self {
         self.with_id_is_not("1002")
-    }
-
-
-
-    pub fn name_is_file(self) -> Self {
-        self.with_name_is("File")
     }
 
     pub fn with_name_is_file(self) -> Self {
         self.with_name_is("File")
     }
 
-
-
     pub fn with_name_is_not_file(self) -> Self {
         self.with_name_is_not("File")
-    }
-
-
-    pub fn name_is_s3(self) -> Self {
-        self.with_name_is("S3")
     }
 
     pub fn with_name_is_s3(self) -> Self {
         self.with_name_is("S3")
     }
 
-
-
     pub fn with_name_is_not_s3(self) -> Self {
         self.with_name_is_not("S3")
-    }
-
-
-
-    pub fn code_is_fil_e(self) -> Self {
-        self.with_code_is("FILE")
     }
 
     pub fn with_code_is_fil_e(self) -> Self {
         self.with_code_is("FILE")
     }
 
-
-
     pub fn with_code_is_not_fil_e(self) -> Self {
         self.with_code_is_not("FILE")
-    }
-
-
-    pub fn code_is_s3(self) -> Self {
-        self.with_code_is("S3")
     }
 
     pub fn with_code_is_s3(self) -> Self {
         self.with_code_is("S3")
     }
 
-
-
     pub fn with_code_is_not_s3(self) -> Self {
         self.with_code_is_not("S3")
     }
 
-
-
-
     pub fn filter_by_platform(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("platform_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("platform_id", value.entity_id_value()));
         self
     }
 
@@ -1598,10 +1593,10 @@ impl<R> BlobStoreTypeRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn without_platform_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -1611,10 +1606,10 @@ impl<R> BlobStoreTypeRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn have_platform(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("platform_id"));
@@ -1625,7 +1620,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("platform_id"));
         self
     }
-
 
     pub fn group_by_platform(self) -> Self {
         self.group_by("platform_id")
@@ -1667,7 +1661,6 @@ impl<R> BlobStoreTypeRequest<R> {
         self.group_by_platform_with(request)
     }
 
-
     pub fn roll_up_to_platform(self) -> Self {
         self.roll_up_to_platform_with(crate::Q::platforms().unlimited())
     }
@@ -1688,7 +1681,9 @@ impl<R> BlobStoreTypeRequest<R> {
 
     pub fn unselect_platform(mut self) -> Self {
         self.query.projection.retain(|field| field != "platform_id");
-        self.query.relations.retain(|relation| relation.name != "platform");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "platform");
         self
     }
     pub fn select_platform(mut self) -> Self {
@@ -1698,12 +1693,17 @@ impl<R> BlobStoreTypeRequest<R> {
 
     pub fn select_platform_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("platform", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("platform", selection));
+        self.query = self
+            .query
+            .relation_query("platform", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_platform_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_platform_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_platform_as_with_options(facet_name, request, true)
     }
 
@@ -1722,14 +1722,21 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
     pub fn have_blob_store_configurations(self) -> Self {
-        self.with_blob_store_configuration_list_matching(SelectQuery::new("BlobStoreConfiguration"))
+        self.with_blob_store_configuration_list_matching(
+            crate::Q::blob_store_configurations_minimal(),
+        )
     }
 
     pub fn have_no_blob_store_configurations(self) -> Self {
-        self.without_blob_store_configuration_list_matching(SelectQuery::new("BlobStoreConfiguration"))
+        self.without_blob_store_configuration_list_matching(
+            crate::Q::blob_store_configurations_minimal(),
+        )
     }
 
-    pub fn with_blob_store_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn with_blob_store_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::in_subquery(
             "id",
@@ -1737,11 +1744,17 @@ impl<R> BlobStoreTypeRequest<R> {
             selection.query.clone(),
             "blob_store_type_id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "blob_store_configuration_list",
+            selection,
+        ));
         self
     }
 
-    pub fn without_blob_store_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_blob_store_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -1749,7 +1762,10 @@ impl<R> BlobStoreTypeRequest<R> {
             selection.query.clone(),
             "blob_store_type_id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "blob_store_configuration_list",
+            selection,
+        ));
         self
     }
 
@@ -1758,28 +1774,41 @@ impl<R> BlobStoreTypeRequest<R> {
         self
     }
 
-    pub fn select_blob_store_configuration_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn select_blob_store_configuration_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("blob_store_configuration_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("blob_store_configuration_list", selection));
+        self.query = self
+            .query
+            .relation_query("blob_store_configuration_list", selection.into_query());
         self
-}
+    }
     pub fn count_blob_store_configurations(self) -> Self {
         self.count_blob_store_configurations_as("count_blob_store_configurations")
     }
 
     pub fn count_blob_store_configurations_as(self, alias: impl Into<String>) -> Self {
-        self.count_blob_store_configurations_with(alias, crate::Q::blob_store_configurations().unlimited())
+        self.count_blob_store_configurations_with(
+            alias,
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn count_blob_store_configurations_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_blob_store_configurations_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "blob_store_configuration_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -1787,133 +1816,364 @@ impl<R> BlobStoreTypeRequest<R> {
         self.stats_from_blob_store_configurations_as("refinements", request)
     }
 
-    pub fn stats_from_blob_store_configurations_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_blob_store_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "blob_store_configuration_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                false,
+            ));
         self
     }
 
-    pub fn group_by_blob_store_configurations_with_details(self, request: impl Into<QuerySelection>) -> Self {
+    fn scalar_from_blob_store_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_blob_store_configurations_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.stats_from_blob_store_configurations(request)
     }
 
-
     pub fn sum_total_size_of_blob_store_configurations(self) -> Self {
-        self.sum_total_size_of_blob_store_configurations_as("sum_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sum_total_size_of_blob_store_configurations_as(
+            "sum_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sum_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().sum("total_size", "sum_total_size"))
+    pub fn sum_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("total_size", "sum_total_size"),
+        )
     }
     pub fn min_total_size_of_blob_store_configurations(self) -> Self {
-        self.min_total_size_of_blob_store_configurations_as("min_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.min_total_size_of_blob_store_configurations_as(
+            "min_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn min_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().min("total_size", "min_total_size"))
+    pub fn min_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("total_size", "min_total_size"),
+        )
     }
     pub fn max_total_size_of_blob_store_configurations(self) -> Self {
-        self.max_total_size_of_blob_store_configurations_as("max_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.max_total_size_of_blob_store_configurations_as(
+            "max_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn max_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().max("total_size", "max_total_size"))
+    pub fn max_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("total_size", "max_total_size"),
+        )
     }
     pub fn avg_total_size_of_blob_store_configurations(self) -> Self {
-        self.avg_total_size_of_blob_store_configurations_as("avg_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.avg_total_size_of_blob_store_configurations_as(
+            "avg_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn avg_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().avg("total_size", "avg_total_size"))
+    pub fn avg_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("total_size", "avg_total_size"),
+        )
     }
     pub fn standard_deviation_total_size_of_blob_store_configurations(self) -> Self {
-        self.standard_deviation_total_size_of_blob_store_configurations_as("standard_deviation_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.standard_deviation_total_size_of_blob_store_configurations_as(
+            "standard_deviation_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev("total_size", "stdDev_total_size"))
+    pub fn standard_deviation_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("total_size", "stdDev_total_size"),
+        )
     }
-    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations(self) -> Self {
+    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations(
+        self,
+    ) -> Self {
         self.square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as("square_root_of_population_standard_deviation_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
     }
 
-    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev_pop("total_size", "stdDevPop_total_size"))
+    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("total_size", "stdDevPop_total_size"),
+        )
     }
     pub fn sample_variance_total_size_of_blob_store_configurations(self) -> Self {
-        self.sample_variance_total_size_of_blob_store_configurations_as("sample_variance_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_variance_total_size_of_blob_store_configurations_as(
+            "sample_variance_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_variance_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_samp("total_size", "varSamp_total_size"))
+    pub fn sample_variance_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("total_size", "varSamp_total_size"),
+        )
     }
     pub fn sample_population_variance_total_size_of_blob_store_configurations(self) -> Self {
-        self.sample_population_variance_total_size_of_blob_store_configurations_as("sample_population_variance_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_population_variance_total_size_of_blob_store_configurations_as(
+            "sample_population_variance_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_pop("total_size", "varPop_total_size"))
+    pub fn sample_population_variance_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("total_size", "varPop_total_size"),
+        )
     }
     pub fn sum_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sum_blob_count_of_blob_store_configurations_as("sum_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sum_blob_count_of_blob_store_configurations_as(
+            "sum_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sum_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().sum("blob_count", "sum_blob_count"))
+    pub fn sum_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("blob_count", "sum_blob_count"),
+        )
     }
     pub fn min_blob_count_of_blob_store_configurations(self) -> Self {
-        self.min_blob_count_of_blob_store_configurations_as("min_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.min_blob_count_of_blob_store_configurations_as(
+            "min_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn min_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().min("blob_count", "min_blob_count"))
+    pub fn min_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("blob_count", "min_blob_count"),
+        )
     }
     pub fn max_blob_count_of_blob_store_configurations(self) -> Self {
-        self.max_blob_count_of_blob_store_configurations_as("max_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.max_blob_count_of_blob_store_configurations_as(
+            "max_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn max_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().max("blob_count", "max_blob_count"))
+    pub fn max_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("blob_count", "max_blob_count"),
+        )
     }
     pub fn avg_blob_count_of_blob_store_configurations(self) -> Self {
-        self.avg_blob_count_of_blob_store_configurations_as("avg_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.avg_blob_count_of_blob_store_configurations_as(
+            "avg_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn avg_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().avg("blob_count", "avg_blob_count"))
+    pub fn avg_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("blob_count", "avg_blob_count"),
+        )
     }
     pub fn standard_deviation_blob_count_of_blob_store_configurations(self) -> Self {
-        self.standard_deviation_blob_count_of_blob_store_configurations_as("standard_deviation_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.standard_deviation_blob_count_of_blob_store_configurations_as(
+            "standard_deviation_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev("blob_count", "stdDev_blob_count"))
+    pub fn standard_deviation_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("blob_count", "stdDev_blob_count"),
+        )
     }
-    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations(self) -> Self {
+    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations(
+        self,
+    ) -> Self {
         self.square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as("square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
     }
 
-    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev_pop("blob_count", "stdDevPop_blob_count"))
+    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("blob_count", "stdDevPop_blob_count"),
+        )
     }
     pub fn sample_variance_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sample_variance_blob_count_of_blob_store_configurations_as("sample_variance_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_variance_blob_count_of_blob_store_configurations_as(
+            "sample_variance_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_variance_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_samp("blob_count", "varSamp_blob_count"))
+    pub fn sample_variance_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("blob_count", "varSamp_blob_count"),
+        )
     }
     pub fn sample_population_variance_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sample_population_variance_blob_count_of_blob_store_configurations_as("sample_population_variance_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_population_variance_blob_count_of_blob_store_configurations_as(
+            "sample_population_variance_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_pop("blob_count", "varPop_blob_count"))
+    pub fn sample_population_variance_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("blob_count", "varPop_blob_count"),
+        )
     }
 }
 
@@ -1923,13 +2183,13 @@ impl<R> Default for BlobStoreTypeRequest<R> {
     }
 }
 
-impl<R> From< BlobStoreTypeRequest<R> > for SelectQuery {
+impl<R> From<BlobStoreTypeRequest<R>> for SelectQuery {
     fn from(request: BlobStoreTypeRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< BlobStoreTypeRequest<R> > for QuerySelection {
+impl<R> From<BlobStoreTypeRequest<R>> for QuerySelection {
     fn from(request: BlobStoreTypeRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -1941,14 +2201,19 @@ impl<R> From< BlobStoreTypeRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::BlobStoreType> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::BlobStoreType>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::BlobStoreType;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -1961,98 +2226,166 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<BlobStoreTypeRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::BlobStoreType
+    pub fn new_entity<C>(&self, context: &C) -> crate::BlobStoreType
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::BlobStoreType::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::BlobStoreType::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity =
+            crate::BlobStoreType::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context
+            .user_context()
+            .next_id(crate::BlobStoreType::ENTITY_NAME)
+        {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> BlobStoreTypeRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        Option<R>,
+        crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::BlobStoreTypeRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

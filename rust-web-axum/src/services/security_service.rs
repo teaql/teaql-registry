@@ -1,9 +1,11 @@
-use anyhow::{anyhow, Result};
-use teaql_registry_core::{
-    Q, SecurityPrivilege, SecurityRole, SecurityUser, ServiceRuntime,
-};
-use teaql_core::{Entity, SmartList};
 use crate::services::SaveAuditedExt;
+use anyhow::{anyhow, Result};
+use std::collections::HashSet;
+use teaql_core::{Entity, SmartList};
+use teaql_registry_core::{
+    SecurityPrivilege, SecurityRole, SecurityRolePrivilege, SecurityUser, SecurityUserRole,
+    ServiceRuntime, Q,
+};
 
 use crate::context::NexusContextExt;
 
@@ -18,8 +20,8 @@ impl SecurityService {
             .select_self_fields()
             .with_username_is(username)
             .limit(1)
-            .comment("what: Load user by username")
-            .purpose("why: Authenticate incoming request")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find user: {}", e))?;
@@ -36,8 +38,8 @@ impl SecurityService {
             .filter_by_tenant(tenant_id)
             .with_username_is(username)
             .limit(1)
-            .comment("what: Load user by username and tenant")
-            .purpose("why: Authenticate incoming request")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to find user: {}", e))?;
@@ -48,8 +50,8 @@ impl SecurityService {
         let rows = Q::security_users_minimal()
             .select_self_fields()
             .limit(100)
-            .comment("what: List all users for tenant")
-            .purpose("why: REST security users list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list users: {}", e))?;
@@ -64,8 +66,8 @@ impl SecurityService {
             .select_self_fields()
             .filter_by_tenant(tenant_id)
             .limit(100)
-            .comment("what: List all users for tenant")
-            .purpose("why: REST security users list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list users: {}", e))?;
@@ -81,7 +83,16 @@ impl SecurityService {
         password_hash: &str,
     ) -> Result<SecurityUser> {
         let tenant_id = ctx.tenant_id();
-        Self::create_user_with_tenant(ctx, tenant_id, username, first_name, last_name, email, password_hash).await
+        Self::create_user_with_tenant(
+            ctx,
+            tenant_id,
+            username,
+            first_name,
+            last_name,
+            email,
+            password_hash,
+        )
+        .await
     }
 
     pub async fn create_user_with_tenant(
@@ -94,7 +105,8 @@ impl SecurityService {
         password_hash: &str,
     ) -> Result<SecurityUser> {
         let mut user = Q::security_users()
-            .purpose("why: Create new user account")
+            .comment("what: create tenant security metadata")
+            .purpose("why: provision durable registry authorization")
             .new_entity(ctx);
 
         user.update_tenant_id(tenant_id);
@@ -105,7 +117,7 @@ impl SecurityService {
         user.update_password_hash(password_hash);
         user.update_user_status_to_active();
 
-        user.clone()
+        let user = user
             .audit_as("Creating user account")
             .save_with(ctx)
             .await
@@ -114,12 +126,23 @@ impl SecurityService {
         Ok(user)
     }
 
+    pub async fn replace_password_hash(
+        ctx: &ServiceRuntime,
+        mut user: SecurityUser,
+        password_hash: &str,
+    ) -> Result<SecurityUser> {
+        user.update_password_hash(password_hash);
+        user.audit_as("Rotate registry account credential")
+            .save_with(ctx)
+            .await
+    }
+
     pub async fn list_roles(ctx: &ServiceRuntime) -> Result<SmartList<SecurityRole>> {
         let rows = Q::security_roles_minimal()
             .select_self_fields()
             .limit(100)
-            .comment("what: List all roles for tenant")
-            .purpose("why: REST security roles list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list roles: {}", e))?;
@@ -134,8 +157,8 @@ impl SecurityService {
             .select_self_fields()
             .filter_by_tenant(tenant_id)
             .limit(100)
-            .comment("what: List all roles for tenant")
-            .purpose("why: REST security roles list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list roles: {}", e))?;
@@ -146,8 +169,8 @@ impl SecurityService {
         let rows = Q::security_privileges_minimal()
             .select_self_fields()
             .limit(100)
-            .comment("what: List all privileges for tenant")
-            .purpose("why: REST security privileges list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list privileges: {}", e))?;
@@ -162,8 +185,8 @@ impl SecurityService {
             .select_self_fields()
             .filter_by_tenant(tenant_id)
             .limit(100)
-            .comment("what: List all privileges for tenant")
-            .purpose("why: REST security privileges list API")
+            .comment("what: query tenant security metadata")
+            .purpose("why: authenticate and authorize registry operations")
             .execute_for_list(ctx)
             .await
             .map_err(|e| anyhow!("Failed to list privileges: {}", e))?;
@@ -190,7 +213,8 @@ impl SecurityService {
         read_only: bool,
     ) -> Result<SecurityRole> {
         let mut role = Q::security_roles()
-            .purpose("why: Create new security role")
+            .comment("what: create tenant security metadata")
+            .purpose("why: provision durable registry authorization")
             .new_entity(ctx);
 
         role.update_tenant_id(tenant_id);
@@ -199,7 +223,7 @@ impl SecurityService {
         role.update_description(description);
         role.update_read_only(read_only);
 
-        role.clone()
+        let role = role
             .audit_as("Creating security role")
             .save_with(ctx)
             .await
@@ -231,6 +255,7 @@ impl SecurityService {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_privilege_with_tenant(
         ctx: &ServiceRuntime,
         tenant_id: u64,
@@ -242,7 +267,8 @@ impl SecurityService {
         read_only: bool,
     ) -> Result<SecurityPrivilege> {
         let mut priv_entity = Q::security_privileges()
-            .purpose("why: Create new security privilege")
+            .comment("what: create tenant security metadata")
+            .purpose("why: provision durable registry authorization")
             .new_entity(ctx);
 
         priv_entity.update_tenant_id(tenant_id);
@@ -253,13 +279,181 @@ impl SecurityService {
         priv_entity.update_permission_pattern(permission_pattern);
         priv_entity.update_read_only(read_only);
 
-        priv_entity
-            .clone()
+        let priv_entity = priv_entity
             .audit_as("Creating security privilege")
             .save_with(ctx)
             .await
             .map_err(|e| anyhow!("Failed to save security privilege: {}", e))?;
 
         Ok(priv_entity)
+    }
+
+    pub async fn find_role_by_tenant_and_key(
+        ctx: &ServiceRuntime,
+        tenant_id: u64,
+        role_key: &str,
+    ) -> Result<Option<SecurityRole>> {
+        let rows = Q::security_roles_minimal()
+            .select_self_fields()
+            .filter_by_tenant(tenant_id)
+            .with_role_id_is(role_key)
+            .limit(1)
+            .comment("what: locate a tenant security role")
+            .purpose("why: create or evaluate a durable role assignment")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|error| anyhow!("Failed to find role: {error}"))?;
+        Ok(rows.into_iter().next())
+    }
+
+    pub async fn find_privilege_by_tenant_and_key(
+        ctx: &ServiceRuntime,
+        tenant_id: u64,
+        privilege_key: &str,
+    ) -> Result<Option<SecurityPrivilege>> {
+        let rows = Q::security_privileges_minimal()
+            .select_self_fields()
+            .filter_by_tenant(tenant_id)
+            .with_privilege_id_is(privilege_key)
+            .limit(1)
+            .comment("what: locate a tenant security privilege")
+            .purpose("why: create or evaluate a durable privilege assignment")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|error| anyhow!("Failed to find privilege: {error}"))?;
+        Ok(rows.into_iter().next())
+    }
+
+    pub async fn reconcile_privilege_pattern(
+        ctx: &ServiceRuntime,
+        mut privilege: SecurityPrivilege,
+        privilege_type: &str,
+        permission_pattern: &str,
+    ) -> Result<SecurityPrivilege> {
+        if privilege.privilege_type() == privilege_type
+            && privilege.permission_pattern() == permission_pattern
+        {
+            return Ok(privilege);
+        }
+        privilege.update_privilege_type(privilege_type);
+        privilege.update_permission_pattern(permission_pattern);
+        privilege
+            .audit_as("Reconcile registry privilege policy")
+            .save_with(ctx)
+            .await
+    }
+
+    pub async fn assign_role(
+        ctx: &ServiceRuntime,
+        tenant_id: u64,
+        user_id: u64,
+        role_id: u64,
+    ) -> Result<SecurityUserRole> {
+        let rows = Q::security_user_roles_minimal()
+            .select_self_fields()
+            .with_security_user_matching(Q::security_users_minimal().with_id_is(user_id))
+            .with_security_role_matching(Q::security_roles_minimal().with_id_is(role_id))
+            .limit(1)
+            .comment("what: locate an existing user role assignment")
+            .purpose("why: keep tenant security provisioning idempotent")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|error| anyhow!("Failed to query user role assignment: {error}"))?;
+        if let Some(assignment) = rows.into_iter().next() {
+            return Ok(assignment);
+        }
+
+        let mut assignment = Q::security_user_roles()
+            .comment("what: initialize a user role assignment")
+            .purpose("why: bind an authenticated principal to explicit permissions")
+            .new_entity(ctx);
+        assignment.update_tenant_id(tenant_id);
+        assignment.update_security_user_id(user_id);
+        assignment.update_security_role_id(role_id);
+        assignment
+            .audit_as("Assign security role to user")
+            .save_with(ctx)
+            .await
+    }
+
+    pub async fn assign_privilege(
+        ctx: &ServiceRuntime,
+        tenant_id: u64,
+        role_id: u64,
+        privilege_id: u64,
+    ) -> Result<SecurityRolePrivilege> {
+        let rows = Q::security_role_privileges_minimal()
+            .select_self_fields()
+            .with_security_role_matching(Q::security_roles_minimal().with_id_is(role_id))
+            .with_security_privilege_matching(
+                Q::security_privileges_minimal().with_id_is(privilege_id),
+            )
+            .limit(1)
+            .comment("what: locate an existing role privilege assignment")
+            .purpose("why: keep tenant security provisioning idempotent")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|error| anyhow!("Failed to query role privilege assignment: {error}"))?;
+        if let Some(assignment) = rows.into_iter().next() {
+            return Ok(assignment);
+        }
+
+        let mut assignment = Q::security_role_privileges()
+            .comment("what: initialize a role privilege assignment")
+            .purpose("why: bind a role to an explicit permission pattern")
+            .new_entity(ctx);
+        assignment.update_tenant_id(tenant_id);
+        assignment.update_security_role_id(role_id);
+        assignment.update_security_privilege_id(privilege_id);
+        assignment
+            .audit_as("Assign security privilege to role")
+            .save_with(ctx)
+            .await
+    }
+
+    pub async fn permissions_for_user(
+        ctx: &ServiceRuntime,
+        user_id: u64,
+    ) -> Result<HashSet<String>> {
+        let user_roles = Q::security_user_roles_minimal()
+            .select_self_fields()
+            .with_security_user_matching(Q::security_users_minimal().with_id_is(user_id))
+            .limit(100)
+            .comment("what: load roles assigned to the authenticated user")
+            .purpose("why: authorize the current registry request")
+            .execute_for_list(ctx)
+            .await
+            .map_err(|error| anyhow!("Failed to load user roles: {error}"))?;
+
+        let mut permissions = HashSet::new();
+        for user_role in user_roles {
+            let role_privileges = Q::security_role_privileges_minimal()
+                .select_self_fields()
+                .with_security_role_matching(
+                    Q::security_roles_minimal().with_id_is(user_role.security_role_id()),
+                )
+                .limit(100)
+                .comment("what: load privileges assigned to an authenticated role")
+                .purpose("why: authorize the current registry request")
+                .execute_for_list(ctx)
+                .await
+                .map_err(|error| anyhow!("Failed to load role privileges: {error}"))?;
+
+            for role_privilege in role_privileges {
+                let privileges = Q::security_privileges_minimal()
+                    .select_self_fields()
+                    .with_id_is(role_privilege.security_privilege_id())
+                    .limit(1)
+                    .comment("what: load an assigned permission pattern")
+                    .purpose("why: authorize the current registry request")
+                    .execute_for_list(ctx)
+                    .await
+                    .map_err(|error| anyhow!("Failed to load assigned privilege: {error}"))?;
+                if let Some(privilege) = privileges.into_iter().next() {
+                    permissions.insert(privilege.permission_pattern().to_string());
+                }
+            }
+        }
+        Ok(permissions)
     }
 }

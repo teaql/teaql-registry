@@ -1,25 +1,25 @@
+#![recursion_limit = "256"]
+
+mod common;
+
 use axum::http::StatusCode;
 use bytes::Bytes;
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
     blobstore::{BlobStore, S3BlobStore},
     security::password::hash_password,
-    services::{
-        BlobStoreService, ComponentService, RepositoryService, SecurityService,
-    },
+    services::{BlobStoreService, ComponentService, RepositoryService, SecurityService},
 };
-use std::sync::Arc;
+use teaql_registry_core::service_runtime;
 use tower::ServiceExt;
 
 async fn setup_test_app() -> axum::Router {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
 
-    let runtime = service_runtime(config).await.expect("Runtime connect error");
+    let runtime = service_runtime(config)
+        .await
+        .expect("Runtime connect error");
     runtime.ensure_schema().await.expect("Schema init error");
 
     let blobstore: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env("test-blobs"));
@@ -97,30 +97,32 @@ async fn setup_test_app() -> axum::Router {
         .unwrap();
     }
 
-    let app_state = AppState {
-        runtime: Arc::new(runtime),
-        blobstore,
-    };
+    let app_state = AppState::new(Arc::new(runtime), blobstore);
 
     build_app(app_state)
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_debug_component_query() {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+#[test]
+fn test_debug_component_query() {
+    common::run_with_large_stack(test_debug_component_query_body);
+}
+
+async fn test_debug_component_query_body() {
+    let config = common::runtime_config();
     let runtime = service_runtime(config).await.unwrap();
     runtime.ensure_schema().await.unwrap();
-    let res = ComponentService::find_or_create(&runtime, 1, "com.example", "demo", "1.0.0", "jar").await;
+    let res =
+        ComponentService::find_or_create(&runtime, 1, "com.example", "demo", "1.0.0", "jar").await;
     println!("find_or_create result: {:?}", res);
     assert!(res.is_ok());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_status_endpoints() {
+#[test]
+fn test_rest_status_endpoints() {
+    common::run_with_large_stack(test_rest_status_endpoints_body);
+}
+
+async fn test_rest_status_endpoints_body() {
     let app = setup_test_app().await;
 
     // Test /service/rest/v1/status
@@ -140,8 +142,12 @@ async fn test_rest_status_endpoints() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_rest_repositories_and_security() {
+#[test]
+fn test_rest_repositories_and_security() {
+    common::run_with_large_stack(test_rest_repositories_and_security_body);
+}
+
+async fn test_rest_repositories_and_security_body() {
     let app = setup_test_app().await;
 
     // List repositories
@@ -177,15 +183,25 @@ async fn test_rest_repositories_and_security() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_artifact_upload_download_and_group_routing() {
+#[test]
+fn test_artifact_upload_download_and_group_routing() {
+    common::run_with_large_stack(test_artifact_upload_download_and_group_routing_body);
+}
+
+async fn test_artifact_upload_download_and_group_routing_body() {
     let app = setup_test_app().await;
 
     let jar_data = b"PK\x03\x04fake-jar-binary-content-1.0.0";
 
     let version = format!("1.0.{}", uuid::Uuid::new_v4().simple());
-    let path = format!("/repository/maven-releases/com/example/demo/{}/demo-{}.jar", version, version);
-    let group_path = format!("/repository/maven-public/com/example/demo/{}/demo-{}.jar", version, version);
+    let path = format!(
+        "/repository/maven-releases/com/example/demo/{}/demo-{}.jar",
+        version, version
+    );
+    let group_path = format!(
+        "/repository/maven-public/com/example/demo/{}/demo-{}.jar",
+        version, version
+    );
 
     // 1. Upload Maven artifact to hosted repo
     let put_req = http::Request::builder()
@@ -196,7 +212,9 @@ async fn test_artifact_upload_download_and_group_routing() {
         .unwrap();
     let put_resp = app.clone().oneshot(put_req).await.unwrap();
     let status = put_resp.status();
-    let body_bytes = axum::body::to_bytes(put_resp.into_body(), 1024 * 1024).await.unwrap();
+    let body_bytes = axum::body::to_bytes(put_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let err_msg = String::from_utf8_lossy(&body_bytes);
     assert_eq!(status, StatusCode::CREATED, "PUT failed with: {}", err_msg);
 
@@ -208,7 +226,9 @@ async fn test_artifact_upload_download_and_group_routing() {
         .unwrap();
     let get_resp = app.clone().oneshot(get_req).await.unwrap();
     assert_eq!(get_resp.status(), StatusCode::OK);
-    let body_bytes = axum::body::to_bytes(get_resp.into_body(), 1024 * 1024).await.unwrap();
+    let body_bytes = axum::body::to_bytes(get_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(body_bytes.as_ref(), jar_data);
 
     // 3. Download via Group repository (maven-public)
@@ -219,7 +239,9 @@ async fn test_artifact_upload_download_and_group_routing() {
         .unwrap();
     let group_resp = app.clone().oneshot(group_req).await.unwrap();
     assert_eq!(group_resp.status(), StatusCode::OK);
-    let group_bytes = axum::body::to_bytes(group_resp.into_body(), 1024 * 1024).await.unwrap();
+    let group_bytes = axum::body::to_bytes(group_resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(group_bytes.as_ref(), jar_data);
 
     // 4. Query Components REST API

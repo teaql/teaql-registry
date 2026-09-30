@@ -21,7 +21,9 @@ impl ProxyEngine {
         }
 
         // 2. Check Negative Cache
-        if crate::engine::proxy_cache::ProxyNegativeCache::global().is_negative_cached(&repo.name(), path) {
+        if crate::engine::proxy_cache::ProxyNegativeCache::global()
+            .is_negative_cached(&repo.name(), path)
+        {
             info!("Proxy negative cache hit for {}:{}", repo.name(), path);
             return Ok(None);
         }
@@ -47,7 +49,11 @@ impl ProxyEngine {
 
         if !response.status().is_success() {
             if response.status() == reqwest::StatusCode::NOT_FOUND {
-                crate::engine::proxy_cache::ProxyNegativeCache::global().record_not_found(&repo.name(), path, 300);
+                crate::engine::proxy_cache::ProxyNegativeCache::global().record_not_found(
+                    &repo.name(),
+                    path,
+                    300,
+                );
             }
             return Ok(None);
         }

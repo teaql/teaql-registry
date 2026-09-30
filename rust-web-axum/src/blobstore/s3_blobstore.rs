@@ -7,6 +7,8 @@ use reqwest::{Client, Method, StatusCode};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::env;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use super::traits::{BlobChecksums, BlobInfo, BlobStore};
@@ -25,7 +27,8 @@ pub struct S3Config {
 impl Default for S3Config {
     fn default() -> Self {
         Self {
-            endpoint: env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:9010".to_string()),
+            endpoint: env::var("S3_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:9010".to_string()),
             region: env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
             access_key: env::var("S3_ACCESS_KEY")
                 .or_else(|_| env::var("AWS_ACCESS_KEY_ID"))
@@ -63,7 +66,9 @@ impl S3BlobStore {
     pub fn new(config: S3Config, store_name: impl Into<String>) -> Self {
         Self {
             config,
-            client: Client::builder().build().expect("Failed to build reqwest client"),
+            client: Client::builder()
+                .build()
+                .expect("Failed to build reqwest client"),
             store_name: store_name.into(),
         }
     }
@@ -156,9 +161,19 @@ impl S3BlobStore {
         );
 
         let url = if let Some(q) = query {
-            format!("{}{}{}?{}", self.config.endpoint.trim_end_matches('/'), canonical_uri, "", q)
+            format!(
+                "{}{}{}?{}",
+                self.config.endpoint.trim_end_matches('/'),
+                canonical_uri,
+                "",
+                q
+            )
         } else {
-            format!("{}{}", self.config.endpoint.trim_end_matches('/'), canonical_uri)
+            format!(
+                "{}{}",
+                self.config.endpoint.trim_end_matches('/'),
+                canonical_uri
+            )
         };
 
         let mut req = self
@@ -181,18 +196,96 @@ impl S3BlobStore {
         let resp = req.send().await?;
         Ok(resp)
     }
+
+    async fn send_streaming_put(
+        &self,
+        path: &str,
+        file: File,
+        content_length: i64,
+        payload_hash: &str,
+    ) -> Result<reqwest::Response> {
+        let now = chrono::Utc::now();
+        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date_stamp = now.format("%Y%m%d").to_string();
+        let endpoint_url = reqwest::Url::parse(&self.config.endpoint)?;
+        let host = endpoint_url
+            .host_str()
+            .ok_or_else(|| anyhow!("Invalid S3 endpoint host"))?;
+        let host_header = endpoint_url
+            .port()
+            .map(|port| format!("{host}:{port}"))
+            .unwrap_or_else(|| host.to_string());
+        let canonical_uri = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{path}")
+        };
+        let canonical_headers = format!(
+            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+            host_header, payload_hash, amz_date
+        );
+        let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+        let canonical_request = format!(
+            "PUT\n{}\n\n{}\n{}\n{}",
+            canonical_uri, canonical_headers, signed_headers, payload_hash
+        );
+        let credential_scope = format!("{}/{}/s3/aws4_request", date_stamp, self.config.region);
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+            amz_date,
+            credential_scope,
+            hex::encode(Sha256::digest(canonical_request.as_bytes()))
+        );
+        let signing_key = get_signature_key(
+            &self.config.secret_key,
+            &date_stamp,
+            &self.config.region,
+            "s3",
+        );
+        let signature = hex::encode(sign_key(&signing_key, string_to_sign.as_bytes()));
+        let authorization = format!(
+            "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+            self.config.access_key, credential_scope, signed_headers, signature
+        );
+        let url = format!(
+            "{}{}",
+            self.config.endpoint.trim_end_matches('/'),
+            canonical_uri
+        );
+        let stream = tokio_util::io::ReaderStream::new(file);
+        Ok(self
+            .client
+            .put(url)
+            .header("Host", host_header)
+            .header("x-amz-date", amz_date)
+            .header("x-amz-content-sha256", payload_hash)
+            .header("Authorization", authorization)
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Length", content_length)
+            .body(reqwest::Body::wrap_stream(stream))
+            .send()
+            .await?)
+    }
 }
 
 #[async_trait]
 impl BlobStore for S3BlobStore {
     async fn init(&self) -> Result<()> {
         let path = format!("/{}", self.config.bucket);
-        let resp = self.send_s3_request(Method::HEAD, &path, None, vec![], None).await?;
+        let resp = self
+            .send_s3_request(Method::HEAD, &path, None, vec![], None)
+            .await?;
         if resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::FORBIDDEN {
-            let create_resp = self.send_s3_request(Method::PUT, &path, None, vec![], None).await?;
+            let create_resp = self
+                .send_s3_request(Method::PUT, &path, None, vec![], None)
+                .await?;
             if !create_resp.status().is_success() && create_resp.status() != StatusCode::CONFLICT {
                 let err_body = create_resp.text().await.unwrap_or_default();
-                return Err(anyhow!("Failed to create S3 bucket '{}': {}", self.config.bucket, err_body));
+                return Err(anyhow!(
+                    "Failed to create S3 bucket '{}': {}",
+                    self.config.bucket,
+                    err_body
+                ));
             }
         }
         Ok(())
@@ -205,12 +298,22 @@ impl BlobStore for S3BlobStore {
         let path = format!("/{}/{}", self.config.bucket, object_key);
 
         let resp = self
-            .send_s3_request(Method::PUT, &path, None, data.to_vec(), Some("application/octet-stream"))
+            .send_s3_request(
+                Method::PUT,
+                &path,
+                None,
+                data.to_vec(),
+                Some("application/octet-stream"),
+            )
             .await?;
 
         if !resp.status().is_success() {
             let err_body = resp.text().await.unwrap_or_default();
-            return Err(anyhow!("Failed to upload blob to S3 '{}': {}", path, err_body));
+            return Err(anyhow!(
+                "Failed to upload blob to S3 '{}': {}",
+                path,
+                err_body
+            ));
         }
 
         let mut sha1_hasher = Sha1::new();
@@ -238,7 +341,9 @@ impl BlobStore for S3BlobStore {
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
 
-        let resp = self.send_s3_request(Method::GET, &path, None, vec![], None).await?;
+        let resp = self
+            .send_s3_request(Method::GET, &path, None, vec![], None)
+            .await?;
         if !resp.status().is_success() {
             return Err(anyhow!("Blob not found in S3: {}", blob_ref));
         }
@@ -252,7 +357,9 @@ impl BlobStore for S3BlobStore {
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
 
-        let resp = self.send_s3_request(Method::DELETE, &path, None, vec![], None).await?;
+        let resp = self
+            .send_s3_request(Method::DELETE, &path, None, vec![], None)
+            .await?;
         if !resp.status().is_success() && resp.status() != StatusCode::NOT_FOUND {
             let err = resp.text().await.unwrap_or_default();
             return Err(anyhow!("Failed to delete S3 blob: {}", err));
@@ -265,11 +372,88 @@ impl BlobStore for S3BlobStore {
         let object_key = self.get_object_key(blob_id);
         let path = format!("/{}/{}", self.config.bucket, object_key);
 
-        let resp = self.send_s3_request(Method::HEAD, &path, None, vec![], None).await?;
+        let resp = self
+            .send_s3_request(Method::HEAD, &path, None, vec![], None)
+            .await?;
         Ok(resp.status().is_success())
     }
 
     fn store_name(&self) -> &str {
         &self.store_name
+    }
+
+    async fn create_blob_from_stream(
+        &self,
+        mut stream: crate::blobstore::ByteStream,
+    ) -> Result<BlobInfo> {
+        use futures_util::StreamExt;
+
+        let blob_id = Uuid::new_v4().to_string();
+        let blob_ref = format!("{}@{}", self.store_name, blob_id);
+        let temp_path = std::env::temp_dir().join(format!("teaql-registry-{blob_id}.upload"));
+        let mut temp = tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .await?;
+        let mut sha1_hasher = Sha1::new();
+        let mut sha256_hasher = Sha256::new();
+        let mut md5_hasher = Md5::new();
+        let mut total_size = 0_i64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| anyhow!("stream read error: {error}"))?;
+            temp.write_all(&chunk).await?;
+            sha1_hasher.update(&chunk);
+            sha256_hasher.update(&chunk);
+            md5_hasher.update(&chunk);
+            total_size += chunk.len() as i64;
+        }
+        temp.flush().await?;
+        drop(temp);
+
+        let sha256 = hex::encode(sha256_hasher.finalize());
+        let object_key = self.get_object_key(&blob_id);
+        let path = format!("/{}/{}", self.config.bucket, object_key);
+        let file = File::open(&temp_path).await?;
+        let response = self
+            .send_streaming_put(&path, file, total_size, &sha256)
+            .await;
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        let response = response?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("S3 streaming upload failed ({status}): {body}"));
+        }
+
+        Ok(BlobInfo {
+            blob_id,
+            blob_ref,
+            size: total_size,
+            checksums: BlobChecksums {
+                sha1: hex::encode(sha1_hasher.finalize()),
+                sha256,
+                md5: hex::encode(md5_hasher.finalize()),
+            },
+        })
+    }
+
+    async fn read_blob_stream(&self, blob_ref: &str) -> Result<crate::blobstore::ByteStream> {
+        use futures_util::StreamExt;
+
+        let blob_id = blob_ref.split('@').nth(1).unwrap_or(blob_ref);
+        let object_key = self.get_object_key(blob_id);
+        let path = format!("/{}/{}", self.config.bucket, object_key);
+        let response = self
+            .send_s3_request(Method::GET, &path, None, vec![], None)
+            .await?;
+        if !response.status().is_success() {
+            return Err(anyhow!("Blob not found in S3: {blob_ref}"));
+        }
+        Ok(Box::pin(
+            response
+                .bytes_stream()
+                .map(|chunk| chunk.map_err(std::io::Error::other)),
+        ))
     }
 }

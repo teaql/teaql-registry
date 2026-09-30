@@ -25,7 +25,7 @@ fn serve_embedded_file(path: &str) -> Response<axum::body::Body> {
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, mime.as_ref())
                 .body(axum::body::Body::from(content.data.into_owned()))
-                .unwrap()
+                .expect("failed to build ui response")
         }
         None => {
             // SPA fallback to index.html
@@ -34,12 +34,12 @@ fn serve_embedded_file(path: &str) -> Response<axum::body::Body> {
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                     .body(axum::body::Body::from(index.data.into_owned()))
-                    .unwrap()
+                    .expect("failed to build ui response")
             } else {
                 Response::builder()
                     .status(StatusCode::NOT_FOUND)
                     .body(axum::body::Body::from("Frontend not found"))
-                    .unwrap()
+                    .expect("failed to build ui response")
             }
         }
     }

@@ -1,6 +1,10 @@
+#![recursion_limit = "256"]
+
+use bytes::Bytes;
+use futures_util::StreamExt;
 use std::sync::Arc;
 use teaql_registry::blobstore::{
-    BlobStore, FileBlobStore, MemoryBlobStore, S3BlobStore,
+    BlobStore, ByteStream, FileBlobStore, MemoryBlobStore, S3BlobStore,
 };
 use tempfile::tempdir;
 
@@ -8,16 +12,56 @@ async fn assert_blobstore_contract(store: Arc<dyn BlobStore>) {
     store.init().await.expect("init failed");
 
     let payload = b"Polymorphic BlobStore Contract Payload";
-    let info = store.create_blob(payload).await.expect("create_blob failed");
+    let info = store
+        .create_blob(payload)
+        .await
+        .expect("create_blob failed");
 
     assert_eq!(info.size, payload.len() as i64);
     assert!(store.exists_blob(&info.blob_ref).await.unwrap());
 
-    let read_back = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
+    let read_back = store
+        .read_blob(&info.blob_ref)
+        .await
+        .expect("read_blob failed");
     assert_eq!(read_back.as_ref(), payload);
 
-    store.delete_blob(&info.blob_ref).await.expect("delete_blob failed");
+    store
+        .delete_blob(&info.blob_ref)
+        .await
+        .expect("delete_blob failed");
     assert!(!store.exists_blob(&info.blob_ref).await.unwrap());
+}
+
+async fn assert_streaming_contract(store: Arc<dyn BlobStore>) {
+    store.init().await.expect("init failed");
+    let chunks = [
+        b"streaming ".as_slice(),
+        b"blob ".as_slice(),
+        b"payload".as_slice(),
+    ];
+    let input: ByteStream = Box::pin(futures_util::stream::iter(
+        chunks
+            .iter()
+            .map(|chunk| Ok(Bytes::copy_from_slice(chunk)))
+            .collect::<Vec<_>>(),
+    ));
+    let info = store
+        .create_blob_from_stream(input)
+        .await
+        .expect("streaming upload failed");
+    assert_eq!(info.size, 22);
+
+    let mut output = store
+        .read_blob_stream(&info.blob_ref)
+        .await
+        .expect("streaming download failed");
+    let mut bytes = Vec::new();
+    while let Some(chunk) = output.next().await {
+        bytes.extend_from_slice(&chunk.expect("download chunk failed"));
+    }
+    assert_eq!(bytes, b"streaming blob payload");
+    store.delete_blob(&info.blob_ref).await.unwrap();
 }
 
 #[tokio::test]
@@ -34,10 +78,24 @@ async fn test_file_blobstore_contract() {
 }
 
 #[tokio::test]
+async fn test_file_blobstore_streaming_contract() {
+    let temp = tempdir().expect("tempdir failed");
+    let store: Arc<dyn BlobStore> = Arc::new(FileBlobStore::new(temp.path(), "file-stream"));
+    assert_streaming_contract(store).await;
+}
+
+#[tokio::test]
 async fn test_s3_blobstore_contract() {
     let store_name = format!("s3-contract-{}", uuid::Uuid::new_v4().simple());
     let store: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env(store_name));
     assert_blobstore_contract(store).await;
+}
+
+#[tokio::test]
+async fn test_s3_blobstore_streaming_contract() {
+    let store_name = format!("s3-stream-{}", uuid::Uuid::new_v4().simple());
+    let store: Arc<dyn BlobStore> = Arc::new(S3BlobStore::from_env(store_name));
+    assert_streaming_contract(store).await;
 }
 
 #[tokio::test]
@@ -51,7 +109,10 @@ async fn test_s3_blobstore_create_read_and_checksums() {
     store.init().await.expect("init failed");
 
     let payload = b"Hello Nexus Rust S3 BlobStore!";
-    let info = store.create_blob(payload).await.expect("create_blob failed");
+    let info = store
+        .create_blob(payload)
+        .await
+        .expect("create_blob failed");
 
     let mut sha1_h = Sha1::new();
     sha1_h.update(payload);
@@ -71,7 +132,10 @@ async fn test_s3_blobstore_create_read_and_checksums() {
     assert_eq!(info.checksums.md5, expected_md5);
 
     // Read blob back
-    let data = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
+    let data = store
+        .read_blob(&info.blob_ref)
+        .await
+        .expect("read_blob failed");
     assert_eq!(data.as_ref(), payload);
 }
 
@@ -82,17 +146,26 @@ async fn test_s3_blobstore_empty_blob() {
     store.init().await.expect("init failed");
 
     let payload = b"";
-    let info = store.create_blob(payload).await.expect("create_blob failed");
+    let info = store
+        .create_blob(payload)
+        .await
+        .expect("create_blob failed");
 
     assert_eq!(info.size, 0);
-    assert_eq!(info.checksums.sha1, "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+    assert_eq!(
+        info.checksums.sha1,
+        "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    );
     assert_eq!(
         info.checksums.sha256,
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     );
     assert_eq!(info.checksums.md5, "d41d8cd98f00b204e9800998ecf8427e");
 
-    let data = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
+    let data = store
+        .read_blob(&info.blob_ref)
+        .await
+        .expect("read_blob failed");
     assert_eq!(data.len(), 0);
 }
 
@@ -108,10 +181,16 @@ async fn test_s3_blobstore_binary_payload() {
         payload.push((i % 256) as u8);
     }
 
-    let info = store.create_blob(&payload).await.expect("create_blob failed");
+    let info = store
+        .create_blob(&payload)
+        .await
+        .expect("create_blob failed");
     assert_eq!(info.size, payload.len() as i64);
 
-    let read_back = store.read_blob(&info.blob_ref).await.expect("read_blob failed");
+    let read_back = store
+        .read_blob(&info.blob_ref)
+        .await
+        .expect("read_blob failed");
     assert_eq!(read_back.as_ref(), payload.as_slice());
 }
 
@@ -124,10 +203,18 @@ async fn test_s3_blobstore_delete_and_non_existent() {
     let info = store.create_blob(b"Ephemeral S3 content").await.unwrap();
     assert!(store.read_blob(&info.blob_ref).await.is_ok());
 
-    store.delete_blob(&info.blob_ref).await.expect("delete_blob failed");
+    store
+        .delete_blob(&info.blob_ref)
+        .await
+        .expect("delete_blob failed");
     let read_res = store.read_blob(&info.blob_ref).await;
-    assert!(read_res.is_err(), "Expected error when reading deleted blob");
+    assert!(
+        read_res.is_err(),
+        "Expected error when reading deleted blob"
+    );
 
-    let non_existent = store.read_blob("del-store@00000000-0000-0000-0000-000000000000").await;
+    let non_existent = store
+        .read_blob("del-store@00000000-0000-0000-0000-000000000000")
+        .await;
     assert!(non_existent.is_err());
 }

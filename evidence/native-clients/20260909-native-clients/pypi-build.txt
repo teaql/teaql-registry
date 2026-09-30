@@ -1,0 +1,39 @@
+* Getting build dependencies for wheel...
+running egg_info
+creating src/teaql_native_probe_20260909_native_clients.egg-info
+writing src/teaql_native_probe_20260909_native_clients.egg-info/PKG-INFO
+writing dependency_links to src/teaql_native_probe_20260909_native_clients.egg-info/dependency_links.txt
+writing top-level names to src/teaql_native_probe_20260909_native_clients.egg-info/top_level.txt
+writing manifest file 'src/teaql_native_probe_20260909_native_clients.egg-info/SOURCES.txt'
+reading manifest file 'src/teaql_native_probe_20260909_native_clients.egg-info/SOURCES.txt'
+writing manifest file 'src/teaql_native_probe_20260909_native_clients.egg-info/SOURCES.txt'
+* Building wheel...
+running bdist_wheel
+running build
+running build_py
+creating build/lib/teaql_native_probe_20260909-native-clients
+copying src/teaql_native_probe_20260909-native-clients/__init__.py -> build/lib/teaql_native_probe_20260909-native-clients
+running egg_info
+writing src/teaql_native_probe_20260909_native_clients.egg-info/PKG-INFO
+writing dependency_links to src/teaql_native_probe_20260909_native_clients.egg-info/dependency_links.txt
+writing top-level names to src/teaql_native_probe_20260909_native_clients.egg-info/top_level.txt
+reading manifest file 'src/teaql_native_probe_20260909_native_clients.egg-info/SOURCES.txt'
+writing manifest file 'src/teaql_native_probe_20260909_native_clients.egg-info/SOURCES.txt'
+installing to build/bdist.linux-x86_64/wheel
+running install
+running install_lib
+creating build/bdist.linux-x86_64/wheel
+creating build/bdist.linux-x86_64/wheel/teaql_native_probe_20260909-native-clients
+copying build/lib/teaql_native_probe_20260909-native-clients/__init__.py -> build/bdist.linux-x86_64/wheel/./teaql_native_probe_20260909-native-clients
+running install_egg_info
+Copying src/teaql_native_probe_20260909_native_clients.egg-info to build/bdist.linux-x86_64/wheel/./teaql_native_probe_20260909_native_clients-0.0.1-py3.10.egg-info
+running install_scripts
+creating build/bdist.linux-x86_64/wheel/teaql_native_probe_20260909_native_clients-0.0.1.dist-info/WHEEL
+creating '/tmp/teaql-registry-native.B7lJ0k/python/dist/.tmp-74dhvaxq/teaql_native_probe_20260909_native_clients-0.0.1-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+adding 'teaql_native_probe_20260909-native-clients/__init__.py'
+adding 'teaql_native_probe_20260909_native_clients-0.0.1.dist-info/METADATA'
+adding 'teaql_native_probe_20260909_native_clients-0.0.1.dist-info/WHEEL'
+adding 'teaql_native_probe_20260909_native_clients-0.0.1.dist-info/top_level.txt'
+adding 'teaql_native_probe_20260909_native_clients-0.0.1.dist-info/RECORD'
+removing build/bdist.linux-x86_64/wheel
+Successfully built teaql_native_probe_20260909_native_clients-0.0.1-py3-none-any.whl

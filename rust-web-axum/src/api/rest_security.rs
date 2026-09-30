@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::repository_content::AppState;
-use crate::security::password::hash_password;
+use crate::security::password::{hash_password, validate_password_strength};
 use crate::services::SecurityService;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,8 +59,13 @@ pub struct AnonymousConfigXO {
     pub realm_name: String,
 }
 
-pub async fn list_users(State(state): State<AppState>) -> Response {
-    match SecurityService::list_users(&state.runtime).await {
+pub async fn list_users(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match SecurityService::list_users(&request.runtime).await {
         Ok(users) => {
             let items: Vec<UserXO> = users
                 .into_iter()
@@ -80,12 +85,21 @@ pub async fn list_users(State(state): State<AppState>) -> Response {
 }
 
 pub async fn create_user(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
     Json(payload): Json<CreateUserRequest>,
 ) -> Response {
+    if let Err(e) = validate_password_strength(
+        &payload.password,
+        &[&payload.user_id, &payload.email_address],
+    ) {
+        return (StatusCode::BAD_REQUEST, format!("Password rejected: {}", e)).into_response();
+    }
     let password_hash = hash_password(&payload.password);
     match SecurityService::create_user(
-        &state.runtime,
+        &request.runtime,
         &payload.user_id,
         payload.first_name.as_deref().unwrap_or(""),
         payload.last_name.as_deref().unwrap_or(""),
@@ -99,8 +113,13 @@ pub async fn create_user(
     }
 }
 
-pub async fn list_roles(State(state): State<AppState>) -> Response {
-    match SecurityService::list_roles(&state.runtime).await {
+pub async fn list_roles(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match SecurityService::list_roles(&request.runtime).await {
         Ok(roles) => {
             let items: Vec<RoleXO> = roles
                 .into_iter()
@@ -117,8 +136,13 @@ pub async fn list_roles(State(state): State<AppState>) -> Response {
     }
 }
 
-pub async fn list_privileges(State(state): State<AppState>) -> Response {
-    match SecurityService::list_privileges(&state.runtime).await {
+pub async fn list_privileges(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+) -> Response {
+    match SecurityService::list_privileges(&request.runtime).await {
         Ok(privs) => {
             let items: Vec<PrivilegeXO> = privs
                 .into_iter()
@@ -137,17 +161,11 @@ pub async fn list_privileges(State(state): State<AppState>) -> Response {
     }
 }
 
-pub async fn get_anonymous_config() -> Response {
+pub async fn get_anonymous_config(State(state): State<AppState>) -> Response {
     Json(AnonymousConfigXO {
-        enabled: true,
+        enabled: state.allows_anonymous_read(),
         user_id: "anonymous".to_string(),
         realm_name: "NexusAuthorizingRealm".to_string(),
     })
     .into_response()
-}
-
-pub async fn update_anonymous_config(
-    Json(_config): Json<AnonymousConfigXO>,
-) -> Response {
-    StatusCode::NO_CONTENT.into_response()
 }

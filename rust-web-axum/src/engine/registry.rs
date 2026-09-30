@@ -16,12 +16,12 @@ impl RepositoryRegistry {
     }
 
     pub fn register(&self, handler: Arc<dyn RepositoryHandler>) {
-        let mut map = self.handlers.write().unwrap();
+        let mut map = self.handlers.write().expect("lock poisoned");
         map.insert(handler.format_name().to_string(), handler);
     }
 
     pub fn get(&self, format: &str) -> Option<Arc<dyn RepositoryHandler>> {
-        let map = self.handlers.read().unwrap();
+        let map = self.handlers.read().expect("lock poisoned");
         map.get(format).cloned()
     }
 }

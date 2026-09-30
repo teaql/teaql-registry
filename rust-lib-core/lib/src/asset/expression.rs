@@ -5,7 +5,10 @@ pub struct AssetExpression<'a> {
 }
 
 impl<'a> AssetExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a crate::Asset>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<&'a crate::Asset>,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -13,9 +16,10 @@ impl<'a> AssetExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -24,7 +28,8 @@ impl<'a> AssetExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a crate::Asset {
-        self.resolve().expect("Relation was legitimately null in database!")
+        self.resolve()
+            .expect("Relation was legitimately null in database!")
     }
 
     pub fn get_id(self) -> crate::ValueExpression<'a, u64> {
@@ -33,7 +38,9 @@ impl<'a> AssetExpression<'a> {
     }
 
     pub fn get_component_id(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("component_id", |entity| entity.eval_component_id());
+        let next = self
+            .result
+            .and_then("component_id", |entity| entity.eval_component_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
@@ -48,25 +55,35 @@ impl<'a> AssetExpression<'a> {
     }
 
     pub fn get_version(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("version", |entity| entity.eval_version());
+        let next = self
+            .result
+            .and_then("version", |entity| entity.eval_version());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_content_repository_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("content_repository_id", |entity| entity.eval_content_repository_id());
+        let next = self.result.and_then("content_repository_id", |entity| {
+            entity.eval_content_repository_id()
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_asset_blob_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("asset_blob_id", |entity| entity.eval_asset_blob_id());
+        let next = self
+            .result
+            .and_then("asset_blob_id", |entity| entity.eval_asset_blob_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_content_repository(self) -> crate::ContentRepositoryExpression<'a> {
-        let next = self.result.and_then("content_repository", |entity| entity.eval_content_repository());
+        let next = self.result.and_then("content_repository", |entity| {
+            entity.eval_content_repository()
+        });
         crate::ContentRepositoryExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_asset_blob(self) -> crate::AssetBlobExpression<'a> {
-        let next = self.result.and_then("asset_blob", |entity| entity.eval_asset_blob());
+        let next = self
+            .result
+            .and_then("asset_blob", |entity| entity.eval_asset_blob());
         crate::AssetBlobExpression::new(next, self.root_desc.clone())
     }
 }
@@ -78,7 +95,10 @@ pub struct AssetListExpression<'a> {
 }
 
 impl<'a> AssetListExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a teaql_core::SmartList<crate::Asset>>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<&'a teaql_core::SmartList<crate::Asset>>,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -86,9 +106,10 @@ impl<'a> AssetListExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -97,11 +118,14 @@ impl<'a> AssetListExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a teaql_core::SmartList<crate::Asset> {
-        self.resolve().expect("List relation was legitimately null in database!")
+        self.resolve()
+            .expect("List relation was legitimately null in database!")
     }
 
     pub fn size(&self) -> crate::ValueExpression<'a, usize> {
-        let next = self.result.clone().and_then("size", |list| teaql_core::eval::EvalResult::Value(list.len()));
+        let next = self.result.clone().and_then("size", |list| {
+            teaql_core::eval::EvalResult::Value(list.len())
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use serde_json::Value as JsonValue;
-use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, Record, SelectQuery, SmartList};
+use teaql_core::{Aggregate, AggregateFunction, EntityDescriptor, Expr, SelectQuery, SmartList};
 use teaql_runtime::{DataServiceError, RuntimeError};
 
 use crate::request_support::*;
@@ -45,9 +45,7 @@ impl<R> Clone for TenantRequest<R> {
 impl<R> TenantRequest<R> {
     pub(crate) fn new() -> Self {
         Self {
-            query: SelectQuery::new("Tenant")
-                .project("id")
-                .project("version"),
+            query: SelectQuery::new("Tenant").project("id").project("version"),
             relation_selections: Vec::new(),
             relation_filters: Vec::new(),
             child_enhancements: Vec::new(),
@@ -91,20 +89,19 @@ impl<R> TenantRequest<R> {
         self.query
     }
 
-
     pub fn purpose(self, purpose: impl Into<String>) -> crate::PurposedQuery<Self> {
         crate::PurposedQuery::new(self, purpose)
     }
 
     pub(crate) async fn _execute_for_list<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let repository = ctx
+        let repository = context
             .tenant_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let query_options = self.query_options.clone();
@@ -113,29 +110,62 @@ impl<R> TenantRequest<R> {
             self.query,
             &query_options,
             &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_enhanced_entities_with_relation_aggregates::<R>(
-            &query,
-            &relation_aggregates,
-        ).await?;
-        let facets = execute_facets(ctx, query.as_query(), &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        let (mut rows, facets) = if query_options.facets.is_empty() {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates_owned::<R>(
+                    query,
+                    &relation_aggregates,
+                )
+                .await?;
+            (rows, std::collections::BTreeMap::new())
+        } else {
+            let rows = repository
+                .fetch_enhanced_entities_with_relation_aggregates::<R>(&query, &relation_aggregates)
+                .await?;
+            let facets = execute_facets(context, query.as_query(), &query_options)
+                .await
+                .map_err(DataServiceError::Runtime)?;
+            (rows, facets)
+        };
         attach_facets(&mut rows, facets);
         Ok(rows)
     }
 
+    pub(crate) async fn _execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<SmartList<teaql_core::CompactRow>, TeaqlDataServiceError<C::TenantRepository<'a>>>
+    where
+        C: TeaqlRepositoryProvider + ?Sized,
+    {
+        let repository = context
+            .tenant_repository()
+            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
+        let query = authorize_query(apply_runtime_metadata(
+            self.query,
+            &self.query_options,
+            &self.child_enhancements,
+        ))
+        .map_err(DataServiceError::Runtime)?;
+        repository.fetch_smart_list(&query).await
+    }
+
     pub(crate) async fn _execute_for_stream<'a, C>(
         self,
-        ctx: &'a C,
-    ) -> Result<TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::TenantRepository<'a>>>, TeaqlDataServiceError<C::TenantRepository<'a>>>
+        context: &'a C,
+    ) -> Result<
+        TeaqlEntityStream<'a, R, TeaqlDataServiceError<C::TenantRepository<'a>>>,
+        TeaqlDataServiceError<C::TenantRepository<'a>>,
+    >
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
         Ok(Box::pin(async_stream::try_stream! {
             use futures_util::StreamExt;
-            let repository = ctx
+            let repository = context
                 .tenant_repository()
                 .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
             let query_options = self.query_options.clone();
@@ -146,8 +176,8 @@ impl<R> TenantRequest<R> {
             )).map_err(DataServiceError::Runtime)?;
             let mut chunks = repository.fetch_stream(&query).await?;
             while let Some(chunk) = chunks.next().await {
-                for record in chunk?.rows {
-                    yield R::from_record(record).map_err(DataServiceError::Entity)?;
+                for row in chunk?.rows {
+                    yield R::from_compact_row(row).map_err(DataServiceError::Entity)?;
                 }
             }
         }))
@@ -155,31 +185,30 @@ impl<R> TenantRequest<R> {
 
     pub(crate) async fn _execute_for_first<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let rows = self.limit(1)._execute_for_list(ctx).await?;
+        let rows = self.limit(1)._execute_for_list(context).await?;
         Ok(rows.into_iter().next())
     }
 
     pub(crate) async fn _execute_for_one<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<Option<R>, TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        self._execute_for_first(ctx).await
+        self._execute_for_first(context).await
     }
-
 
     pub(crate) async fn _execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
     ) -> Result<SmartList<R>, TeaqlDataServiceError<C::TenantRepository<'a>>>
@@ -187,23 +216,39 @@ impl<R> TenantRequest<R> {
         C: TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity,
     {
-        let total_count = self.clone()._execute_for_count(ctx).await?;
-        let mut rows = self.page_offset(offset, limit)._execute_for_list(ctx).await?;
+        if self.query.id_set_pagination.is_some() {
+            let mut rows = self
+                .clone()
+                .page_offset(offset, limit)
+                ._execute_for_list(context)
+                .await?;
+            if rows.total_count.is_none() {
+                rows.total_count = Some(self._execute_for_count(context).await?);
+            }
+            return Ok(rows);
+        }
+        let total_count = self.clone()._execute_for_count(context).await?;
+        let mut rows = self
+            .page_offset(offset, limit)
+            ._execute_for_list(context)
+            .await?;
         rows.total_count = Some(total_count);
         Ok(rows)
     }
 
     pub(crate) async fn _execute_for_count<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<u64, TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .tenant_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let mut query = self.query;
+        let query_options = self.query_options.clone();
+        let mut query =
+            apply_runtime_metadata(self.query, &query_options, &self.child_enhancements);
         query.projection.clear();
         query.expr_projection.clear();
         query.order_by.clear();
@@ -215,17 +260,21 @@ impl<R> TenantRequest<R> {
         rows.first()
             .and_then(|row| row.get(COUNT_ALIAS))
             .and_then(teaql_core::Value::try_u64)
-            .ok_or_else(|| DataServiceError::Runtime(RuntimeError::Graph(format!("count result for Tenant is missing or not numeric"))))
+            .ok_or_else(|| {
+                DataServiceError::Runtime(RuntimeError::Graph(format!(
+                    "count result for Tenant is missing or not numeric"
+                )))
+            })
     }
 
     pub(crate) async fn _execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: TeaqlRepositoryProvider + ?Sized,
     {
-        let repository = ctx
+        let repository = context
             .tenant_repository()
             .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
         let mut query = self.query.limit(1);
@@ -233,43 +282,6 @@ impl<R> TenantRequest<R> {
         let query = authorize_query(query).map_err(DataServiceError::Runtime)?;
         let rows = repository.fetch_all(&query).await?;
         Ok(!rows.is_empty())
-    }
-
-    pub(crate) async fn _execute_for_records<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<SmartList<Record>, TeaqlDataServiceError<C::TenantRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let repository = ctx
-            .tenant_repository()
-            .map_err(|err| DataServiceError::Runtime(RuntimeError::Graph(err.to_string())))?;
-        let query_options = self.query_options.clone();
-        let outer_query = self.query.clone();
-        let relation_aggregates = runtime_relation_aggregates(&query_options);
-        let query = authorize_query(apply_runtime_metadata(
-            self.query,
-            &query_options,
-            &self.child_enhancements,
-        )).map_err(DataServiceError::Runtime)?;
-        let mut rows = repository.fetch_smart_list_with_relation_aggregates(&query, &relation_aggregates).await?;
-        let facets = execute_facets(ctx, &outer_query, &query_options)
-            .await
-            .map_err(DataServiceError::Runtime)?;
-        attach_facets(&mut rows, facets);
-        Ok(rows)
-    }
-
-    pub(crate) async fn _execute_for_record<'a, C>(
-        self,
-        ctx: &'a C,
-    ) -> Result<Option<Record>, TeaqlDataServiceError<C::TenantRepository<'a>>>
-    where
-        C: TeaqlRepositoryProvider + ?Sized,
-    {
-        let records = self.limit(1)._execute_for_records(ctx).await?;
-        Ok(records.into_iter().next())
     }
 
     pub fn search_with_text(mut self, text: impl Into<String>) -> Self {
@@ -325,10 +337,11 @@ impl<R> TenantRequest<R> {
         mut self,
         types: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list(TYPE_FIELD, types.into_iter().map(Into::into)));
         self
     }
-
 
     pub fn with_type_group(mut self) -> Self {
         self.query = self.query.project(TYPE_GROUP_FIELD);
@@ -338,7 +351,12 @@ impl<R> TenantRequest<R> {
     pub fn matching_any_of(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
         let entity = EntityDescriptor::new(selection.query.entity.clone());
-        self.query = self.query.and_filter(Expr::in_subquery("id", entity, selection.query.clone(), "id"));
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            entity,
+            selection.query.clone(),
+            "id",
+        ));
         self
     }
 
@@ -355,7 +373,6 @@ impl<R> TenantRequest<R> {
         let request = self;
         request
     }
-
 
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
         self.query_options.comment = Some(comment.into());
@@ -376,7 +393,9 @@ impl<R> TenantRequest<R> {
     }
 
     pub fn unsafe_raw_sql_filter(mut self, raw_sql: UnsafeRawSqlSegment) -> Self {
-        self.query_options.raw_sql_search_criteria.push(raw_sql.into_sql());
+        self.query_options
+            .raw_sql_search_criteria
+            .push(raw_sql.into_sql());
         self
     }
     pub fn filter_with_json(self, json_expr: impl Into<String>) -> Self {
@@ -496,42 +515,41 @@ impl<R> TenantRequest<R> {
     fn apply_dynamic_json_chain_filter(self, head: &str, tail: &str, value: &JsonValue) -> Self {
         let _ = (tail, value);
         match head {
-            "platform" => {
-                self.with_platform_matching(
-                    crate::Q::platforms_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "blob_store_configuration_list" => {
-                self.with_blob_store_configuration_list_matching(
-                    crate::Q::blob_store_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "repository_configuration_list" => {
-                self.with_repository_configuration_list_matching(
-                    crate::Q::repository_configurations_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "security_user_list" => {
-                self.with_security_user_list_matching(
-                    crate::Q::security_users_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "security_role_list" => {
-                self.with_security_role_list_matching(
-                    crate::Q::security_roles_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
-            "security_privilege_list" => {
-                self.with_security_privilege_list_matching(
-                    crate::Q::security_privileges_minimal()
-                        .apply_dynamic_json_filter(tail, value),
-                )
-            }
+            "platform" => self.with_platform_matching(
+                crate::Q::platforms_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "blob_store_configuration_list" => self.with_blob_store_configuration_list_matching(
+                crate::Q::blob_store_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
+            "repository_configuration_list" => self.with_repository_configuration_list_matching(
+                crate::Q::repository_configurations_minimal()
+                    .apply_dynamic_json_filter(tail, value),
+            ),
+            "content_repository_list" => self.with_content_repository_list_matching(
+                crate::Q::content_repositories_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_user_list" => self.with_security_user_list_matching(
+                crate::Q::security_users_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_role_list" => self.with_security_role_list_matching(
+                crate::Q::security_roles_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_privilege_list" => self.with_security_privilege_list_matching(
+                crate::Q::security_privileges_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_user_role_list" => self.with_security_user_role_list_matching(
+                crate::Q::security_user_roles_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "security_role_privilege_list" => self.with_security_role_privilege_list_matching(
+                crate::Q::security_role_privileges_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "personal_access_token_list" => self.with_personal_access_token_list_matching(
+                crate::Q::personal_access_tokens_minimal().apply_dynamic_json_filter(tail, value),
+            ),
+            "service_log_list" => self.with_service_log_list_matching(
+                crate::Q::service_logs_minimal().apply_dynamic_json_filter(tail, value),
+            ),
             _ => self,
         }
     }
@@ -605,6 +623,31 @@ impl<R> TenantRequest<R> {
         self
     }
 
+    pub fn optimize_pagination_with_id_set(mut self) -> Self {
+        self.query = self.query.optimize_pagination_with_id_set();
+        self
+    }
+
+    pub fn optimize_pagination_with_id_set_config(
+        mut self,
+        namespace: impl Into<String>,
+        ttl_seconds: u64,
+        max_ids: u64,
+    ) -> Self {
+        self.query =
+            self.query
+                .optimize_pagination_with_id_set_config(namespace, ttl_seconds, max_ids);
+        self
+    }
+
+    /// Select bounded indexed probes for a per-parent Top-N relation only
+    /// when the already-loaded parent count is at or below `threshold`.
+    /// Passing zero explicitly selects the provider window plan.
+    pub fn top_n_probe_parent_threshold(mut self, threshold: usize) -> Self {
+        self.query = self.query.top_n_probe_parent_threshold(threshold);
+        self
+    }
+
     pub fn top(self, top_n: u64) -> Self {
         self.limit(top_n)
     }
@@ -664,9 +707,14 @@ impl<R> TenantRequest<R> {
         let mut request = self.select_all();
         request = request.select_blob_store_configuration_list();
         request = request.select_repository_configuration_list();
+        request = request.select_content_repository_list();
         request = request.select_security_user_list();
         request = request.select_security_role_list();
         request = request.select_security_privilege_list();
+        request = request.select_security_user_role_list();
+        request = request.select_security_role_privilege_list();
+        request = request.select_personal_access_token_list();
+        request = request.select_service_log_list();
         request
     }
 
@@ -679,12 +727,24 @@ impl<R> TenantRequest<R> {
         self
     }
 
+    pub fn count(self) -> Self {
+        self.count_as("count")
+    }
+
+    pub fn count_as(self, alias: impl Into<String>) -> Self {
+        self.aggregate_count(alias)
+    }
+
     pub fn aggregate_count(mut self, alias: impl Into<String>) -> Self {
         self.query = self.query.count(alias);
         self
     }
 
-    pub fn aggregate_count_field(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_count_field(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.count_field(field, alias);
         self
     }
@@ -724,12 +784,20 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn aggregate_stddev_pop(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_stddev_pop(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.stddev_pop(field, alias);
         self
     }
 
-    pub fn aggregate_var_samp(mut self, field: impl Into<String>, alias: impl Into<String>) -> Self {
+    pub fn aggregate_var_samp(
+        mut self,
+        field: impl Into<String>,
+        alias: impl Into<String>,
+    ) -> Self {
         self.query = self.query.var_samp(field, alias);
         self
     }
@@ -760,7 +828,9 @@ impl<R> TenantRequest<R> {
     }
 
     pub fn enable_aggregation_cache_for(mut self, cache_expired_millis: u64) -> Self {
-        self.query = self.query.enable_aggregation_cache_for(cache_expired_millis);
+        self.query = self
+            .query
+            .enable_aggregation_cache_for(cache_expired_millis);
         self
     }
 
@@ -776,9 +846,7 @@ impl<R> TenantRequest<R> {
     pub fn group_by_id_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("id");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("id"));
+        request.query = request.query.project_expr(alias, Expr::column("id"));
         request
     }
 
@@ -831,7 +899,6 @@ impl<R> TenantRequest<R> {
         self.aggregate_max("id", alias)
     }
 
-
     pub fn with_id(
         mut self,
         operator: FieldOperator,
@@ -849,19 +916,13 @@ impl<R> TenantRequest<R> {
         operator: FieldOperator,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Expr {
-        field_operator_expr(
-            "id",
-            operator,
-            values.into_iter().map(Into::into).collect(),
-        )
+        field_operator_expr("id", operator, values.into_iter().map(Into::into).collect())
     }
 
     pub fn with_id_is(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::eq("id", value));
         self
     }
-
-
 
     pub fn with_id_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("id", value));
@@ -872,10 +933,9 @@ impl<R> TenantRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -883,10 +943,9 @@ impl<R> TenantRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::not_in_list(
-            "id",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::not_in_list("id", values.into_iter().map(Into::into)));
         self
     }
 
@@ -909,7 +968,6 @@ impl<R> TenantRequest<R> {
         self.query = self.query.order_gbk_desc("id");
         self
     }
-
 
     pub fn select_name(mut self) -> Self {
         self.query = self.query.project("name");
@@ -938,9 +996,7 @@ impl<R> TenantRequest<R> {
     pub fn group_by_name_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("name");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("name"));
+        request.query = request.query.project_expr(alias, Expr::column("name"));
         request
     }
 
@@ -995,10 +1051,11 @@ impl<R> TenantRequest<R> {
 
     pub fn unselect_name(mut self) -> Self {
         self.query.projection.retain(|field| field != "name");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "name");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "name");
         self
     }
-
 
     pub fn with_name(
         mut self,
@@ -1029,8 +1086,6 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("name", value));
         self
@@ -1041,7 +1096,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn with_name_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_name_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("name", value));
         self
     }
@@ -1069,11 +1127,9 @@ impl<R> TenantRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "name",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("name", range.start, range.end));
         self
     }
 
@@ -1081,10 +1137,9 @@ impl<R> TenantRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "name",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("name", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1148,13 +1203,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_name_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("name"));
         self
     }
-
 
     pub fn order_by_name_asc(mut self) -> Self {
         self.query = self.query.order_asc("name");
@@ -1175,7 +1227,6 @@ impl<R> TenantRequest<R> {
         self.query = self.query.order_gbk_desc("name");
         self
     }
-
 
     pub fn select_code(mut self) -> Self {
         self.query = self.query.project("code");
@@ -1204,9 +1255,7 @@ impl<R> TenantRequest<R> {
     pub fn group_by_code_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("code");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("code"));
+        request.query = request.query.project_expr(alias, Expr::column("code"));
         request
     }
 
@@ -1261,10 +1310,11 @@ impl<R> TenantRequest<R> {
 
     pub fn unselect_code(mut self) -> Self {
         self.query.projection.retain(|field| field != "code");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "code");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "code");
         self
     }
-
 
     pub fn with_code(
         mut self,
@@ -1295,8 +1345,6 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("code", value));
         self
@@ -1307,7 +1355,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn with_code_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_code_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("code", value));
         self
     }
@@ -1335,11 +1386,9 @@ impl<R> TenantRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "code",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("code", range.start, range.end));
         self
     }
 
@@ -1347,10 +1396,9 @@ impl<R> TenantRequest<R> {
         mut self,
         values: impl IntoIterator<Item = impl Into<teaql_core::Value>>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::in_list(
-            "code",
-            values.into_iter().map(Into::into),
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::in_list("code", values.into_iter().map(Into::into)));
         self
     }
 
@@ -1414,13 +1462,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_code_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("code"));
         self
     }
-
 
     pub fn order_by_code_asc(mut self) -> Self {
         self.query = self.query.order_asc("code");
@@ -1441,7 +1486,6 @@ impl<R> TenantRequest<R> {
         self.query = self.query.order_gbk_desc("code");
         self
     }
-
 
     pub fn select_description(mut self) -> Self {
         self.query = self.query.project("description");
@@ -1527,10 +1571,11 @@ impl<R> TenantRequest<R> {
 
     pub fn unselect_description(mut self) -> Self {
         self.query.projection.retain(|field| field != "description");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "description");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "description");
         self
     }
-
 
     pub fn with_description(
         mut self,
@@ -1561,8 +1606,6 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_description_is_not(mut self, value: impl Into<teaql_core::Value>) -> Self {
         self.query = self.query.and_filter(Expr::ne("description", value));
         self
@@ -1573,7 +1616,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn with_description_greater_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_description_greater_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::gte("description", value));
         self
     }
@@ -1583,7 +1629,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn with_description_less_than_or_equal_to(mut self, value: impl Into<teaql_core::Value>) -> Self {
+    pub fn with_description_less_than_or_equal_to(
+        mut self,
+        value: impl Into<teaql_core::Value>,
+    ) -> Self {
         self.query = self.query.and_filter(Expr::lte("description", value));
         self
     }
@@ -1593,7 +1642,9 @@ impl<R> TenantRequest<R> {
         lower: impl Into<teaql_core::Value>,
         upper: impl Into<teaql_core::Value>,
     ) -> Self {
-        self.query = self.query.and_filter(Expr::between("description", lower, upper));
+        self.query = self
+            .query
+            .and_filter(Expr::between("description", lower, upper));
         self
     }
 
@@ -1601,11 +1652,9 @@ impl<R> TenantRequest<R> {
     where
         T: Into<teaql_core::Value>,
     {
-        self.query = self.query.and_filter(Expr::between(
-            "description",
-            range.start,
-            range.end,
-        ));
+        self.query = self
+            .query
+            .and_filter(Expr::between("description", range.start, range.end));
         self
     }
 
@@ -1637,17 +1686,23 @@ impl<R> TenantRequest<R> {
     }
 
     pub fn with_description_not_containing(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_contain("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_contain("description", value));
         self
     }
 
     pub fn with_description_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::begin_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::begin_with("description", value));
         self
     }
 
     pub fn with_description_not_starting_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_begin_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_begin_with("description", value));
         self
     }
 
@@ -1657,12 +1712,16 @@ impl<R> TenantRequest<R> {
     }
 
     pub fn with_description_not_ending_with(mut self, value: impl Into<String>) -> Self {
-        self.query = self.query.and_filter(Expr::not_end_with("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::not_end_with("description", value));
         self
     }
 
     pub fn with_description_sounding_like(mut self, value: impl Into<teaql_core::Value>) -> Self {
-        self.query = self.query.and_filter(Expr::sound_like("description", value));
+        self.query = self
+            .query
+            .and_filter(Expr::sound_like("description", value));
         self
     }
     pub fn with_description_before(mut self, value: impl Into<teaql_core::Value>) -> Self {
@@ -1680,13 +1739,10 @@ impl<R> TenantRequest<R> {
         self
     }
 
-
-
     pub fn with_description_is_known(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("description"));
         self
     }
-
 
     pub fn order_by_description_asc(mut self) -> Self {
         self.query = self.query.order_asc("description");
@@ -1707,7 +1763,6 @@ impl<R> TenantRequest<R> {
         self.query = self.query.order_gbk_desc("description");
         self
     }
-
 
     pub fn select_enabled(mut self) -> Self {
         self.query = self.query.project("enabled");
@@ -1736,9 +1791,7 @@ impl<R> TenantRequest<R> {
     pub fn group_by_enabled_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("enabled");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("enabled"));
+        request.query = request.query.project_expr(alias, Expr::column("enabled"));
         request
     }
 
@@ -1793,7 +1846,9 @@ impl<R> TenantRequest<R> {
 
     pub fn unselect_enabled(mut self) -> Self {
         self.query.projection.retain(|field| field != "enabled");
-        self.query_options.raw_projections.retain(|projection| projection.property_name != "enabled");
+        self.query_options
+            .raw_projections
+            .retain(|projection| projection.property_name != "enabled");
         self
     }
 
@@ -1804,6 +1859,16 @@ impl<R> TenantRequest<R> {
 
     pub fn which_are_not_enabled(mut self) -> Self {
         self.query = self.query.and_filter(Expr::eq("enabled", false));
+        self
+    }
+
+    pub fn with_enabled_is_unknown(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_null("enabled"));
+        self
+    }
+
+    pub fn with_enabled_is_known(mut self) -> Self {
+        self.query = self.query.and_filter(Expr::is_not_null("enabled"));
         self
     }
     pub fn order_by_enabled_asc(mut self) -> Self {
@@ -1833,9 +1898,7 @@ impl<R> TenantRequest<R> {
     pub fn group_by_version_as(self, alias: impl Into<String>) -> Self {
         let alias = alias.into();
         let mut request = self.group_by("version");
-        request.query = request
-            .query
-            .project_expr(alias, Expr::column("version"));
+        request.query = request.query.project_expr(alias, Expr::column("version"));
         request
     }
 
@@ -1908,7 +1971,9 @@ impl<R> TenantRequest<R> {
         self
     }
     pub fn filter_by_platform(mut self, value: impl EntityReference) -> Self {
-        self.query = self.query.and_filter(Expr::eq("platform_id", value.entity_id_value()));
+        self.query = self
+            .query
+            .and_filter(Expr::eq("platform_id", value.entity_id_value()));
         self
     }
 
@@ -1920,10 +1985,10 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn without_platform_matching(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
@@ -1933,10 +1998,10 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "id",
         ));
-        self.relation_filters.push(RelationFilter::new("platform", selection));
+        self.relation_filters
+            .push(RelationFilter::new("platform", selection));
         self
     }
-
 
     pub fn have_platform(mut self) -> Self {
         self.query = self.query.and_filter(Expr::is_not_null("platform_id"));
@@ -1947,7 +2012,6 @@ impl<R> TenantRequest<R> {
         self.query = self.query.and_filter(Expr::is_null("platform_id"));
         self
     }
-
 
     pub fn group_by_platform(self) -> Self {
         self.group_by("platform_id")
@@ -1989,7 +2053,6 @@ impl<R> TenantRequest<R> {
         self.group_by_platform_with(request)
     }
 
-
     pub fn roll_up_to_platform(self) -> Self {
         self.roll_up_to_platform_with(crate::Q::platforms().unlimited())
     }
@@ -2010,7 +2073,9 @@ impl<R> TenantRequest<R> {
 
     pub fn unselect_platform(mut self) -> Self {
         self.query.projection.retain(|field| field != "platform_id");
-        self.query.relations.retain(|relation| relation.name != "platform");
+        self.query
+            .relations
+            .retain(|relation| relation.name != "platform");
         self
     }
     pub fn select_platform(mut self) -> Self {
@@ -2020,12 +2085,17 @@ impl<R> TenantRequest<R> {
 
     pub fn select_platform_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("platform", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("platform", selection));
+        self.query = self
+            .query
+            .relation_query("platform", selection.into_query());
         self
-}
+    }
 
-    pub fn facet_by_platform_as(self, facet_name: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn facet_by_platform_as(
+        self,
+        facet_name: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.facet_by_platform_as_with_options(facet_name, request, true)
     }
 
@@ -2044,14 +2114,21 @@ impl<R> TenantRequest<R> {
         self
     }
     pub fn have_blob_store_configurations(self) -> Self {
-        self.with_blob_store_configuration_list_matching(SelectQuery::new("BlobStoreConfiguration"))
+        self.with_blob_store_configuration_list_matching(
+            crate::Q::blob_store_configurations_minimal(),
+        )
     }
 
     pub fn have_no_blob_store_configurations(self) -> Self {
-        self.without_blob_store_configuration_list_matching(SelectQuery::new("BlobStoreConfiguration"))
+        self.without_blob_store_configuration_list_matching(
+            crate::Q::blob_store_configurations_minimal(),
+        )
     }
 
-    pub fn with_blob_store_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn with_blob_store_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::in_subquery(
             "id",
@@ -2059,11 +2136,17 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "blob_store_configuration_list",
+            selection,
+        ));
         self
     }
 
-    pub fn without_blob_store_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_blob_store_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -2071,7 +2154,10 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("blob_store_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "blob_store_configuration_list",
+            selection,
+        ));
         self
     }
 
@@ -2080,22 +2166,33 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn select_blob_store_configuration_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn select_blob_store_configuration_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("blob_store_configuration_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("blob_store_configuration_list", selection));
+        self.query = self
+            .query
+            .relation_query("blob_store_configuration_list", selection.into_query());
         self
-}
+    }
 
     pub fn have_repository_configurations(self) -> Self {
-        self.with_repository_configuration_list_matching(SelectQuery::new("RepositoryConfiguration"))
+        self.with_repository_configuration_list_matching(
+            crate::Q::repository_configurations_minimal(),
+        )
     }
 
     pub fn have_no_repository_configurations(self) -> Self {
-        self.without_repository_configuration_list_matching(SelectQuery::new("RepositoryConfiguration"))
+        self.without_repository_configuration_list_matching(
+            crate::Q::repository_configurations_minimal(),
+        )
     }
 
-    pub fn with_repository_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn with_repository_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::in_subquery(
             "id",
@@ -2103,11 +2200,17 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "repository_configuration_list",
+            selection,
+        ));
         self
     }
 
-    pub fn without_repository_configuration_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_repository_configuration_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -2115,7 +2218,10 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("repository_configuration_list", selection));
+        self.relation_filters.push(RelationFilter::new(
+            "repository_configuration_list",
+            selection,
+        ));
         self
     }
 
@@ -2124,19 +2230,79 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn select_repository_configuration_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn select_repository_configuration_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("repository_configuration_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("repository_configuration_list", selection));
+        self.query = self
+            .query
+            .relation_query("repository_configuration_list", selection.into_query());
         self
-}
+    }
+
+    pub fn have_content_repositories(self) -> Self {
+        self.with_content_repository_list_matching(crate::Q::content_repositories_minimal())
+    }
+
+    pub fn have_no_content_repositories(self) -> Self {
+        self.without_content_repository_list_matching(crate::Q::content_repositories_minimal())
+    }
+
+    pub fn with_content_repository_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::ContentRepository as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("content_repository_list", selection));
+        self
+    }
+
+    pub fn without_content_repository_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::ContentRepository as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("content_repository_list", selection));
+        self
+    }
+
+    pub fn select_content_repository_list(mut self) -> Self {
+        self.query = self.query.relation("content_repository_list");
+        self
+    }
+
+    pub fn select_content_repository_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("content_repository_list", selection.into_query());
+        self
+    }
 
     pub fn have_security_users(self) -> Self {
-        self.with_security_user_list_matching(SelectQuery::new("SecurityUser"))
+        self.with_security_user_list_matching(crate::Q::security_users_minimal())
     }
 
     pub fn have_no_security_users(self) -> Self {
-        self.without_security_user_list_matching(SelectQuery::new("SecurityUser"))
+        self.without_security_user_list_matching(crate::Q::security_users_minimal())
     }
 
     pub fn with_security_user_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2147,11 +2313,15 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_user_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_user_list", selection));
         self
     }
 
-    pub fn without_security_user_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_security_user_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -2159,7 +2329,8 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_user_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_user_list", selection));
         self
     }
 
@@ -2170,17 +2341,18 @@ impl<R> TenantRequest<R> {
 
     pub fn select_security_user_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("security_user_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("security_user_list", selection));
+        self.query = self
+            .query
+            .relation_query("security_user_list", selection.into_query());
         self
-}
+    }
 
     pub fn have_security_roles(self) -> Self {
-        self.with_security_role_list_matching(SelectQuery::new("SecurityRole"))
+        self.with_security_role_list_matching(crate::Q::security_roles_minimal())
     }
 
     pub fn have_no_security_roles(self) -> Self {
-        self.without_security_role_list_matching(SelectQuery::new("SecurityRole"))
+        self.without_security_role_list_matching(crate::Q::security_roles_minimal())
     }
 
     pub fn with_security_role_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
@@ -2191,11 +2363,15 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_role_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_role_list", selection));
         self
     }
 
-    pub fn without_security_role_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_security_role_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -2203,7 +2379,8 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_role_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_role_list", selection));
         self
     }
 
@@ -2214,20 +2391,24 @@ impl<R> TenantRequest<R> {
 
     pub fn select_security_role_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("security_role_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("security_role_list", selection));
+        self.query = self
+            .query
+            .relation_query("security_role_list", selection.into_query());
         self
-}
+    }
 
     pub fn have_security_privileges(self) -> Self {
-        self.with_security_privilege_list_matching(SelectQuery::new("SecurityPrivilege"))
+        self.with_security_privilege_list_matching(crate::Q::security_privileges_minimal())
     }
 
     pub fn have_no_security_privileges(self) -> Self {
-        self.without_security_privilege_list_matching(SelectQuery::new("SecurityPrivilege"))
+        self.without_security_privilege_list_matching(crate::Q::security_privileges_minimal())
     }
 
-    pub fn with_security_privilege_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn with_security_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::in_subquery(
             "id",
@@ -2235,11 +2416,15 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_privilege_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_privilege_list", selection));
         self
     }
 
-    pub fn without_security_privilege_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn without_security_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
         self.query = self.query.and_filter(Expr::not_in_subquery(
             "id",
@@ -2247,7 +2432,8 @@ impl<R> TenantRequest<R> {
             selection.query.clone(),
             "tenant_id",
         ));
-        self.relation_filters.push(RelationFilter::new("security_privilege_list", selection));
+        self.relation_filters
+            .push(RelationFilter::new("security_privilege_list", selection));
         self
     }
 
@@ -2256,28 +2442,262 @@ impl<R> TenantRequest<R> {
         self
     }
 
-    pub fn select_security_privilege_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+    pub fn select_security_privilege_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query = self.query.relation_query("security_privilege_list", selection.clone().into_query());
-        self.relation_selections.push(RelationSelection::new("security_privilege_list", selection));
+        self.query = self
+            .query
+            .relation_query("security_privilege_list", selection.into_query());
         self
-}
+    }
+
+    pub fn have_security_user_roles(self) -> Self {
+        self.with_security_user_role_list_matching(crate::Q::security_user_roles_minimal())
+    }
+
+    pub fn have_no_security_user_roles(self) -> Self {
+        self.without_security_user_role_list_matching(crate::Q::security_user_roles_minimal())
+    }
+
+    pub fn with_security_user_role_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::SecurityUserRole as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("security_user_role_list", selection));
+        self
+    }
+
+    pub fn without_security_user_role_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::SecurityUserRole as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("security_user_role_list", selection));
+        self
+    }
+
+    pub fn select_security_user_role_list(mut self) -> Self {
+        self.query = self.query.relation("security_user_role_list");
+        self
+    }
+
+    pub fn select_security_user_role_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("security_user_role_list", selection.into_query());
+        self
+    }
+
+    pub fn have_security_role_privileges(self) -> Self {
+        self.with_security_role_privilege_list_matching(crate::Q::security_role_privileges_minimal())
+    }
+
+    pub fn have_no_security_role_privileges(self) -> Self {
+        self.without_security_role_privilege_list_matching(
+            crate::Q::security_role_privileges_minimal(),
+        )
+    }
+
+    pub fn with_security_role_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::SecurityRolePrivilege as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters.push(RelationFilter::new(
+            "security_role_privilege_list",
+            selection,
+        ));
+        self
+    }
+
+    pub fn without_security_role_privilege_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::SecurityRolePrivilege as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters.push(RelationFilter::new(
+            "security_role_privilege_list",
+            selection,
+        ));
+        self
+    }
+
+    pub fn select_security_role_privilege_list(mut self) -> Self {
+        self.query = self.query.relation("security_role_privilege_list");
+        self
+    }
+
+    pub fn select_security_role_privilege_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("security_role_privilege_list", selection.into_query());
+        self
+    }
+
+    pub fn have_personal_access_tokens(self) -> Self {
+        self.with_personal_access_token_list_matching(crate::Q::personal_access_tokens_minimal())
+    }
+
+    pub fn have_no_personal_access_tokens(self) -> Self {
+        self.without_personal_access_token_list_matching(crate::Q::personal_access_tokens_minimal())
+    }
+
+    pub fn with_personal_access_token_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::PersonalAccessToken as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("personal_access_token_list", selection));
+        self
+    }
+
+    pub fn without_personal_access_token_list_matching(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::PersonalAccessToken as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("personal_access_token_list", selection));
+        self
+    }
+
+    pub fn select_personal_access_token_list(mut self) -> Self {
+        self.query = self.query.relation("personal_access_token_list");
+        self
+    }
+
+    pub fn select_personal_access_token_list_with(
+        mut self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("personal_access_token_list", selection.into_query());
+        self
+    }
+
+    pub fn have_service_logs(self) -> Self {
+        self.with_service_log_list_matching(crate::Q::service_logs_minimal())
+    }
+
+    pub fn have_no_service_logs(self) -> Self {
+        self.without_service_log_list_matching(crate::Q::service_logs_minimal())
+    }
+
+    pub fn with_service_log_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::in_subquery(
+            "id",
+            <crate::ServiceLog as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("service_log_list", selection));
+        self
+    }
+
+    pub fn without_service_log_list_matching(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self.query.and_filter(Expr::not_in_subquery(
+            "id",
+            <crate::ServiceLog as teaql_core::TeaqlEntity>::entity_descriptor(),
+            selection.query.clone(),
+            "tenant_id",
+        ));
+        self.relation_filters
+            .push(RelationFilter::new("service_log_list", selection));
+        self
+    }
+
+    pub fn select_service_log_list(mut self) -> Self {
+        self.query = self.query.relation("service_log_list");
+        self
+    }
+
+    pub fn select_service_log_list_with(mut self, request: impl Into<QuerySelection>) -> Self {
+        let selection = request.into();
+        self.query = self
+            .query
+            .relation_query("service_log_list", selection.into_query());
+        self
+    }
     pub fn count_blob_store_configurations(self) -> Self {
         self.count_blob_store_configurations_as("count_blob_store_configurations")
     }
 
     pub fn count_blob_store_configurations_as(self, alias: impl Into<String>) -> Self {
-        self.count_blob_store_configurations_with(alias, crate::Q::blob_store_configurations().unlimited())
+        self.count_blob_store_configurations_with(
+            alias,
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn count_blob_store_configurations_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_blob_store_configurations_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "blob_store_configuration_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -2285,133 +2705,364 @@ impl<R> TenantRequest<R> {
         self.stats_from_blob_store_configurations_as("refinements", request)
     }
 
-    pub fn stats_from_blob_store_configurations_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_blob_store_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "blob_store_configuration_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                false,
+            ));
         self
     }
 
-    pub fn group_by_blob_store_configurations_with_details(self, request: impl Into<QuerySelection>) -> Self {
+    fn scalar_from_blob_store_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "blob_store_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_blob_store_configurations_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.stats_from_blob_store_configurations(request)
     }
 
-
     pub fn sum_total_size_of_blob_store_configurations(self) -> Self {
-        self.sum_total_size_of_blob_store_configurations_as("sum_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sum_total_size_of_blob_store_configurations_as(
+            "sum_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sum_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().sum("total_size", "sum_total_size"))
+    pub fn sum_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("total_size", "sum_total_size"),
+        )
     }
     pub fn min_total_size_of_blob_store_configurations(self) -> Self {
-        self.min_total_size_of_blob_store_configurations_as("min_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.min_total_size_of_blob_store_configurations_as(
+            "min_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn min_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().min("total_size", "min_total_size"))
+    pub fn min_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("total_size", "min_total_size"),
+        )
     }
     pub fn max_total_size_of_blob_store_configurations(self) -> Self {
-        self.max_total_size_of_blob_store_configurations_as("max_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.max_total_size_of_blob_store_configurations_as(
+            "max_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn max_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().max("total_size", "max_total_size"))
+    pub fn max_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("total_size", "max_total_size"),
+        )
     }
     pub fn avg_total_size_of_blob_store_configurations(self) -> Self {
-        self.avg_total_size_of_blob_store_configurations_as("avg_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.avg_total_size_of_blob_store_configurations_as(
+            "avg_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn avg_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().avg("total_size", "avg_total_size"))
+    pub fn avg_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("total_size", "avg_total_size"),
+        )
     }
     pub fn standard_deviation_total_size_of_blob_store_configurations(self) -> Self {
-        self.standard_deviation_total_size_of_blob_store_configurations_as("standard_deviation_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.standard_deviation_total_size_of_blob_store_configurations_as(
+            "standard_deviation_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev("total_size", "stdDev_total_size"))
+    pub fn standard_deviation_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("total_size", "stdDev_total_size"),
+        )
     }
-    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations(self) -> Self {
+    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations(
+        self,
+    ) -> Self {
         self.square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as("square_root_of_population_standard_deviation_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
     }
 
-    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev_pop("total_size", "stdDevPop_total_size"))
+    pub fn square_root_of_population_standard_deviation_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("total_size", "stdDevPop_total_size"),
+        )
     }
     pub fn sample_variance_total_size_of_blob_store_configurations(self) -> Self {
-        self.sample_variance_total_size_of_blob_store_configurations_as("sample_variance_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_variance_total_size_of_blob_store_configurations_as(
+            "sample_variance_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_variance_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_samp("total_size", "varSamp_total_size"))
+    pub fn sample_variance_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("total_size", "varSamp_total_size"),
+        )
     }
     pub fn sample_population_variance_total_size_of_blob_store_configurations(self) -> Self {
-        self.sample_population_variance_total_size_of_blob_store_configurations_as("sample_population_variance_total_size_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_population_variance_total_size_of_blob_store_configurations_as(
+            "sample_population_variance_total_size_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_total_size_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_pop("total_size", "varPop_total_size"))
+    pub fn sample_population_variance_total_size_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("total_size", "varPop_total_size"),
+        )
     }
     pub fn sum_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sum_blob_count_of_blob_store_configurations_as("sum_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sum_blob_count_of_blob_store_configurations_as(
+            "sum_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sum_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().sum("blob_count", "sum_blob_count"))
+    pub fn sum_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("blob_count", "sum_blob_count"),
+        )
     }
     pub fn min_blob_count_of_blob_store_configurations(self) -> Self {
-        self.min_blob_count_of_blob_store_configurations_as("min_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.min_blob_count_of_blob_store_configurations_as(
+            "min_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn min_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().min("blob_count", "min_blob_count"))
+    pub fn min_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("blob_count", "min_blob_count"),
+        )
     }
     pub fn max_blob_count_of_blob_store_configurations(self) -> Self {
-        self.max_blob_count_of_blob_store_configurations_as("max_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.max_blob_count_of_blob_store_configurations_as(
+            "max_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn max_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().max("blob_count", "max_blob_count"))
+    pub fn max_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("blob_count", "max_blob_count"),
+        )
     }
     pub fn avg_blob_count_of_blob_store_configurations(self) -> Self {
-        self.avg_blob_count_of_blob_store_configurations_as("avg_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.avg_blob_count_of_blob_store_configurations_as(
+            "avg_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn avg_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().avg("blob_count", "avg_blob_count"))
+    pub fn avg_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("blob_count", "avg_blob_count"),
+        )
     }
     pub fn standard_deviation_blob_count_of_blob_store_configurations(self) -> Self {
-        self.standard_deviation_blob_count_of_blob_store_configurations_as("standard_deviation_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.standard_deviation_blob_count_of_blob_store_configurations_as(
+            "standard_deviation_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn standard_deviation_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev("blob_count", "stdDev_blob_count"))
+    pub fn standard_deviation_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("blob_count", "stdDev_blob_count"),
+        )
     }
-    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations(self) -> Self {
+    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations(
+        self,
+    ) -> Self {
         self.square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as("square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
     }
 
-    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().stddev_pop("blob_count", "stdDevPop_blob_count"))
+    pub fn square_root_of_population_standard_deviation_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("blob_count", "stdDevPop_blob_count"),
+        )
     }
     pub fn sample_variance_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sample_variance_blob_count_of_blob_store_configurations_as("sample_variance_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_variance_blob_count_of_blob_store_configurations_as(
+            "sample_variance_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_variance_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_samp("blob_count", "varSamp_blob_count"))
+    pub fn sample_variance_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("blob_count", "varSamp_blob_count"),
+        )
     }
     pub fn sample_population_variance_blob_count_of_blob_store_configurations(self) -> Self {
-        self.sample_population_variance_blob_count_of_blob_store_configurations_as("sample_population_variance_blob_count_of_blob_store_configurations", crate::Q::blob_store_configurations().unlimited())
+        self.sample_population_variance_blob_count_of_blob_store_configurations_as(
+            "sample_population_variance_blob_count_of_blob_store_configurations",
+            crate::Q::blob_store_configurations().unlimited(),
+        )
     }
 
-    pub fn sample_population_variance_blob_count_of_blob_store_configurations_as(self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
-        self.stats_from_blob_store_configurations_as(alias, request.into().into_query().var_pop("blob_count", "varPop_blob_count"))
+    pub fn sample_population_variance_blob_count_of_blob_store_configurations_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_blob_store_configurations_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("blob_count", "varPop_blob_count"),
+        )
     }
 
     pub fn count_repository_configurations(self) -> Self {
@@ -2419,17 +3070,26 @@ impl<R> TenantRequest<R> {
     }
 
     pub fn count_repository_configurations_as(self, alias: impl Into<String>) -> Self {
-        self.count_repository_configurations_with(alias, crate::Q::repository_configurations().unlimited())
+        self.count_repository_configurations_with(
+            alias,
+            crate::Q::repository_configurations().unlimited(),
+        )
     }
 
-    pub fn count_repository_configurations_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_repository_configurations_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "repository_configuration_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -2437,23 +3097,279 @@ impl<R> TenantRequest<R> {
         self.stats_from_repository_configurations_as("refinements", request)
     }
 
-    pub fn stats_from_repository_configurations_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_repository_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "repository_configuration_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                false,
+            ));
         self
     }
 
-    pub fn group_by_repository_configurations_with_details(self, request: impl Into<QuerySelection>) -> Self {
+    fn scalar_from_repository_configurations_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "repository_configuration_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_repository_configurations_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.stats_from_repository_configurations(request)
     }
 
+    pub fn count_content_repositories(self) -> Self {
+        self.count_content_repositories_as("count_content_repositories")
+    }
 
+    pub fn count_content_repositories_as(self, alias: impl Into<String>) -> Self {
+        self.count_content_repositories_with(alias, crate::Q::content_repositories().unlimited())
+    }
 
+    pub fn count_content_repositories_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "content_repository_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_content_repositories(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_content_repositories_as("refinements", request)
+    }
+
+    pub fn stats_from_content_repositories_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "content_repository_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_content_repositories_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "content_repository_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_content_repositories_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_content_repositories(request)
+    }
+
+    pub fn sum_repository_id_of_content_repositories(self) -> Self {
+        self.sum_repository_id_of_content_repositories_as(
+            "sum_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn sum_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("repository_id", "sum_repository_id"),
+        )
+    }
+    pub fn min_repository_id_of_content_repositories(self) -> Self {
+        self.min_repository_id_of_content_repositories_as(
+            "min_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn min_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("repository_id", "min_repository_id"),
+        )
+    }
+    pub fn max_repository_id_of_content_repositories(self) -> Self {
+        self.max_repository_id_of_content_repositories_as(
+            "max_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn max_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("repository_id", "max_repository_id"),
+        )
+    }
+    pub fn avg_repository_id_of_content_repositories(self) -> Self {
+        self.avg_repository_id_of_content_repositories_as(
+            "avg_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn avg_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("repository_id", "avg_repository_id"),
+        )
+    }
+    pub fn standard_deviation_repository_id_of_content_repositories(self) -> Self {
+        self.standard_deviation_repository_id_of_content_repositories_as(
+            "standard_deviation_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("repository_id", "stdDev_repository_id"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_repository_id_of_content_repositories(
+        self,
+    ) -> Self {
+        self.square_root_of_population_standard_deviation_repository_id_of_content_repositories_as(
+            "square_root_of_population_standard_deviation_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn square_root_of_population_standard_deviation_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("repository_id", "stdDevPop_repository_id"),
+        )
+    }
+    pub fn sample_variance_repository_id_of_content_repositories(self) -> Self {
+        self.sample_variance_repository_id_of_content_repositories_as(
+            "sample_variance_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("repository_id", "varSamp_repository_id"),
+        )
+    }
+    pub fn sample_population_variance_repository_id_of_content_repositories(self) -> Self {
+        self.sample_population_variance_repository_id_of_content_repositories_as(
+            "sample_population_variance_repository_id_of_content_repositories",
+            crate::Q::content_repositories().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_repository_id_of_content_repositories_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_content_repositories_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("repository_id", "varPop_repository_id"),
+        )
+    }
 
     pub fn count_security_users(self) -> Self {
         self.count_security_users_as("count_security_users")
@@ -2463,14 +3379,20 @@ impl<R> TenantRequest<R> {
         self.count_security_users_with(alias, crate::Q::security_users().unlimited())
     }
 
-    pub fn count_security_users_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_security_users_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_user_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -2478,23 +3400,43 @@ impl<R> TenantRequest<R> {
         self.stats_from_security_users_as("refinements", request)
     }
 
-    pub fn stats_from_security_users_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_security_users_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_user_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_security_users_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
     pub fn group_by_security_users_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_security_users(request)
     }
-
-
-
 
     pub fn count_security_roles(self) -> Self {
         self.count_security_roles_as("count_security_roles")
@@ -2504,14 +3446,20 @@ impl<R> TenantRequest<R> {
         self.count_security_roles_with(alias, crate::Q::security_roles().unlimited())
     }
 
-    pub fn count_security_roles_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_security_roles_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_role_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -2519,23 +3467,43 @@ impl<R> TenantRequest<R> {
         self.stats_from_security_roles_as("refinements", request)
     }
 
-    pub fn stats_from_security_roles_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_security_roles_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_role_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_security_roles_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
     pub fn group_by_security_roles_with_details(self, request: impl Into<QuerySelection>) -> Self {
         self.stats_from_security_roles(request)
     }
-
-
-
 
     pub fn count_security_privileges(self) -> Self {
         self.count_security_privileges_as("count_security_privileges")
@@ -2545,14 +3513,20 @@ impl<R> TenantRequest<R> {
         self.count_security_privileges_with(alias, crate::Q::security_privileges().unlimited())
     }
 
-    pub fn count_security_privileges_with(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn count_security_privileges_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_privilege_list",
-            alias,
-            selection,
-            true,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
         self
     }
 
@@ -2560,23 +3534,1053 @@ impl<R> TenantRequest<R> {
         self.stats_from_security_privileges_as("refinements", request)
     }
 
-    pub fn stats_from_security_privileges_as(mut self, alias: impl Into<String>, request: impl Into<QuerySelection>) -> Self {
+    pub fn stats_from_security_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         let selection = request.into();
-        self.query_options.relation_aggregates.push(RelationAggregate::new(
-            "security_privilege_list",
-            alias,
-            selection,
-            false,
-        ));
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_privilege_list",
+                alias,
+                selection,
+                false,
+            ));
         self
     }
 
-    pub fn group_by_security_privileges_with_details(self, request: impl Into<QuerySelection>) -> Self {
+    fn scalar_from_security_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_security_privileges_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
         self.stats_from_security_privileges(request)
     }
 
+    pub fn count_security_user_roles(self) -> Self {
+        self.count_security_user_roles_as("count_security_user_roles")
+    }
 
+    pub fn count_security_user_roles_as(self, alias: impl Into<String>) -> Self {
+        self.count_security_user_roles_with(alias, crate::Q::security_user_roles().unlimited())
+    }
 
+    pub fn count_security_user_roles_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_role_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_security_user_roles(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_security_user_roles_as("refinements", request)
+    }
+
+    pub fn stats_from_security_user_roles_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_role_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_security_user_roles_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_user_role_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_security_user_roles_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_security_user_roles(request)
+    }
+
+    pub fn count_security_role_privileges(self) -> Self {
+        self.count_security_role_privileges_as("count_security_role_privileges")
+    }
+
+    pub fn count_security_role_privileges_as(self, alias: impl Into<String>) -> Self {
+        self.count_security_role_privileges_with(
+            alias,
+            crate::Q::security_role_privileges().unlimited(),
+        )
+    }
+
+    pub fn count_security_role_privileges_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_security_role_privileges(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_security_role_privileges_as("refinements", request)
+    }
+
+    pub fn stats_from_security_role_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_security_role_privileges_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "security_role_privilege_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_security_role_privileges_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_security_role_privileges(request)
+    }
+
+    pub fn count_personal_access_tokens(self) -> Self {
+        self.count_personal_access_tokens_as("count_personal_access_tokens")
+    }
+
+    pub fn count_personal_access_tokens_as(self, alias: impl Into<String>) -> Self {
+        self.count_personal_access_tokens_with(
+            alias,
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn count_personal_access_tokens_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_personal_access_tokens(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_personal_access_tokens_as("refinements", request)
+    }
+
+    pub fn stats_from_personal_access_tokens_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_personal_access_tokens_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "personal_access_token_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_personal_access_tokens_with_details(
+        self,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.stats_from_personal_access_tokens(request)
+    }
+
+    pub fn min_created_at_of_personal_access_tokens(self) -> Self {
+        self.min_created_at_of_personal_access_tokens_as(
+            "min_created_at_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_created_at_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("created_at", "min_created_at"),
+        )
+    }
+    pub fn max_created_at_of_personal_access_tokens(self) -> Self {
+        self.max_created_at_of_personal_access_tokens_as(
+            "max_created_at_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_created_at_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("created_at", "max_created_at"),
+        )
+    }
+    pub fn sum_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sum_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sum_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sum_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("expires_at_epoch_millis", "sum_expires_at_epoch_millis"),
+        )
+    }
+    pub fn min_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.min_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "min_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("expires_at_epoch_millis", "min_expires_at_epoch_millis"),
+        )
+    }
+    pub fn max_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.max_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "max_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("expires_at_epoch_millis", "max_expires_at_epoch_millis"),
+        )
+    }
+    pub fn avg_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.avg_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "avg_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn avg_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("expires_at_epoch_millis", "avg_expires_at_epoch_millis"),
+        )
+    }
+    pub fn standard_deviation_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "standard_deviation_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("expires_at_epoch_millis", "stdDev_expires_at_epoch_millis"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as("square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens", crate::Q::personal_access_tokens().unlimited())
+    }
+
+    pub fn square_root_of_population_standard_deviation_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request.into().into_query().stddev_pop(
+                "expires_at_epoch_millis",
+                "stdDevPop_expires_at_epoch_millis",
+            ),
+        )
+    }
+    pub fn sample_variance_expires_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sample_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_variance_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("expires_at_epoch_millis", "varSamp_expires_at_epoch_millis"),
+        )
+    }
+    pub fn sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_expires_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("expires_at_epoch_millis", "varPop_expires_at_epoch_millis"),
+        )
+    }
+    pub fn sum_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sum_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sum_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sum_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("revoked_at_epoch_millis", "sum_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn min_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.min_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "min_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn min_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("revoked_at_epoch_millis", "min_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn max_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.max_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "max_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn max_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("revoked_at_epoch_millis", "max_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn avg_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.avg_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "avg_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn avg_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("revoked_at_epoch_millis", "avg_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("revoked_at_epoch_millis", "stdDev_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as("square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens", crate::Q::personal_access_tokens().unlimited())
+    }
+
+    pub fn square_root_of_population_standard_deviation_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request.into().into_query().stddev_pop(
+                "revoked_at_epoch_millis",
+                "stdDevPop_revoked_at_epoch_millis",
+            ),
+        )
+    }
+    pub fn sample_variance_revoked_at_epoch_millis_of_personal_access_tokens(self) -> Self {
+        self.sample_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_variance_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("revoked_at_epoch_millis", "varSamp_revoked_at_epoch_millis"),
+        )
+    }
+    pub fn sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens(
+        self,
+    ) -> Self {
+        self.sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+            "sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens",
+            crate::Q::personal_access_tokens().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_revoked_at_epoch_millis_of_personal_access_tokens_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_personal_access_tokens_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("revoked_at_epoch_millis", "varPop_revoked_at_epoch_millis"),
+        )
+    }
+
+    pub fn count_service_logs(self) -> Self {
+        self.count_service_logs_as("count_service_logs")
+    }
+
+    pub fn count_service_logs_as(self, alias: impl Into<String>) -> Self {
+        self.count_service_logs_with(alias, crate::Q::service_logs().unlimited())
+    }
+
+    pub fn count_service_logs_with(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "service_log_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn stats_from_service_logs(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_service_logs_as("refinements", request)
+    }
+
+    pub fn stats_from_service_logs_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "service_log_list",
+                alias,
+                selection,
+                false,
+            ));
+        self
+    }
+
+    fn scalar_from_service_logs_as(
+        mut self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        let selection = request.into();
+        self.query_options
+            .relation_aggregates
+            .push(RelationAggregate::new(
+                "service_log_list",
+                alias,
+                selection,
+                true,
+            ));
+        self
+    }
+
+    pub fn group_by_service_logs_with_details(self, request: impl Into<QuerySelection>) -> Self {
+        self.stats_from_service_logs(request)
+    }
+
+    pub fn min_event_time_of_service_logs(self) -> Self {
+        self.min_event_time_of_service_logs_as(
+            "min_event_time_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn min_event_time_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("event_time", "min_event_time"),
+        )
+    }
+    pub fn max_event_time_of_service_logs(self) -> Self {
+        self.max_event_time_of_service_logs_as(
+            "max_event_time_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn max_event_time_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("event_time", "max_event_time"),
+        )
+    }
+    pub fn sum_operator_id_of_service_logs(self) -> Self {
+        self.sum_operator_id_of_service_logs_as(
+            "sum_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sum_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("operator_id", "sum_operator_id"),
+        )
+    }
+    pub fn min_operator_id_of_service_logs(self) -> Self {
+        self.min_operator_id_of_service_logs_as(
+            "min_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn min_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("operator_id", "min_operator_id"),
+        )
+    }
+    pub fn max_operator_id_of_service_logs(self) -> Self {
+        self.max_operator_id_of_service_logs_as(
+            "max_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn max_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("operator_id", "max_operator_id"),
+        )
+    }
+    pub fn avg_operator_id_of_service_logs(self) -> Self {
+        self.avg_operator_id_of_service_logs_as(
+            "avg_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn avg_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("operator_id", "avg_operator_id"),
+        )
+    }
+    pub fn standard_deviation_operator_id_of_service_logs(self) -> Self {
+        self.standard_deviation_operator_id_of_service_logs_as(
+            "standard_deviation_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("operator_id", "stdDev_operator_id"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_operator_id_of_service_logs(self) -> Self {
+        self.square_root_of_population_standard_deviation_operator_id_of_service_logs_as(
+            "square_root_of_population_standard_deviation_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn square_root_of_population_standard_deviation_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("operator_id", "stdDevPop_operator_id"),
+        )
+    }
+    pub fn sample_variance_operator_id_of_service_logs(self) -> Self {
+        self.sample_variance_operator_id_of_service_logs_as(
+            "sample_variance_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("operator_id", "varSamp_operator_id"),
+        )
+    }
+    pub fn sample_population_variance_operator_id_of_service_logs(self) -> Self {
+        self.sample_population_variance_operator_id_of_service_logs_as(
+            "sample_population_variance_operator_id_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_operator_id_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("operator_id", "varPop_operator_id"),
+        )
+    }
+    pub fn sum_content_size_of_service_logs(self) -> Self {
+        self.sum_content_size_of_service_logs_as(
+            "sum_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sum_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .sum("content_size", "sum_content_size"),
+        )
+    }
+    pub fn min_content_size_of_service_logs(self) -> Self {
+        self.min_content_size_of_service_logs_as(
+            "min_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn min_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .min("content_size", "min_content_size"),
+        )
+    }
+    pub fn max_content_size_of_service_logs(self) -> Self {
+        self.max_content_size_of_service_logs_as(
+            "max_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn max_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .max("content_size", "max_content_size"),
+        )
+    }
+    pub fn avg_content_size_of_service_logs(self) -> Self {
+        self.avg_content_size_of_service_logs_as(
+            "avg_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn avg_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .avg("content_size", "avg_content_size"),
+        )
+    }
+    pub fn standard_deviation_content_size_of_service_logs(self) -> Self {
+        self.standard_deviation_content_size_of_service_logs_as(
+            "standard_deviation_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn standard_deviation_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev("content_size", "stdDev_content_size"),
+        )
+    }
+    pub fn square_root_of_population_standard_deviation_content_size_of_service_logs(self) -> Self {
+        self.square_root_of_population_standard_deviation_content_size_of_service_logs_as(
+            "square_root_of_population_standard_deviation_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn square_root_of_population_standard_deviation_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .stddev_pop("content_size", "stdDevPop_content_size"),
+        )
+    }
+    pub fn sample_variance_content_size_of_service_logs(self) -> Self {
+        self.sample_variance_content_size_of_service_logs_as(
+            "sample_variance_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sample_variance_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_samp("content_size", "varSamp_content_size"),
+        )
+    }
+    pub fn sample_population_variance_content_size_of_service_logs(self) -> Self {
+        self.sample_population_variance_content_size_of_service_logs_as(
+            "sample_population_variance_content_size_of_service_logs",
+            crate::Q::service_logs().unlimited(),
+        )
+    }
+
+    pub fn sample_population_variance_content_size_of_service_logs_as(
+        self,
+        alias: impl Into<String>,
+        request: impl Into<QuerySelection>,
+    ) -> Self {
+        self.scalar_from_service_logs_as(
+            alias,
+            request
+                .into()
+                .into_query()
+                .var_pop("content_size", "varPop_content_size"),
+        )
+    }
 }
 
 impl<R> Default for TenantRequest<R> {
@@ -2585,13 +4589,13 @@ impl<R> Default for TenantRequest<R> {
     }
 }
 
-impl<R> From< TenantRequest<R> > for SelectQuery {
+impl<R> From<TenantRequest<R>> for SelectQuery {
     fn from(request: TenantRequest<R>) -> Self {
         QuerySelection::from(request).into_query()
     }
 }
 
-impl<R> From< TenantRequest<R> > for QuerySelection {
+impl<R> From<TenantRequest<R>> for QuerySelection {
     fn from(request: TenantRequest<R>) -> Self {
         Self {
             query: request.query,
@@ -2603,14 +4607,19 @@ impl<R> From< TenantRequest<R> > for QuerySelection {
     }
 }
 
-
-impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::Tenant> 
-where C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a
+impl<'a, C> crate::request_support::AuditedSave<'a, C> for teaql_core::Audited<crate::Tenant>
+where
+    C: crate::request_support::TeaqlRepositoryProvider + ?Sized + 'a,
 {
     type Error = crate::TeaqlDataServiceError<C::TenantRepository<'a>>;
-    fn save(self, ctx: &'a C) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<teaql_runtime::GraphNode, Self::Error>> + '_>> {
+    type Entity = crate::Tenant;
+    fn save(
+        self,
+        context: &'a C,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Entity, Self::Error>> + '_>>
+    {
         Box::pin(async move {
-            teaql_runtime::save_audited_ledger_entity(self, ctx.user_context())
+            teaql_runtime::save_audited_ledger_entity(self, context.user_context())
                 .await
                 .map_err(DataServiceError::Runtime)
         })
@@ -2623,98 +4632,156 @@ impl<R: teaql_core::Entity> crate::PurposedQuery<TenantRequest<R>> {
         self
     }
 
-    pub fn new_entity<C>(&self, ctx: &C) -> crate::Tenant
+    pub fn new_entity<C>(&self, context: &C) -> crate::Tenant
     where
         C: crate::TeaqlRuntime + ?Sized,
     {
-        let mut entity = crate::Tenant::runtime_new(ctx.user_context().entity_root());
-        if let Ok(id) = ctx.user_context().next_id(crate::Tenant::ENTITY_NAME) {
+        self.require_comment();
+        let mut entity = crate::Tenant::runtime_new(context.user_context().entity_runtime_state());
+        if let Ok(id) = context.user_context().next_id(crate::Tenant::ENTITY_NAME) {
             entity.update_id(id);
         }
+        teaql_core::Entity::mark_as_new(&mut entity);
         entity
     }
 
     fn into_inner_with_trace(mut self) -> TenantRequest<R> {
-        self.inner.query.trace_chain.push(teaql_core::TraceNode::new(
-            self.inner.query.entity.clone(),
-            None,
-            self.purpose,
-        ));
+        self.require_comment();
         self.inner
+            .query
+            .trace_chain
+            .push(teaql_core::TraceNode::typed(
+                teaql_core::TraceKind::Purpose,
+                self.inner.query.entity.clone(),
+                None,
+                self.purpose,
+            ));
+        self.inner
+    }
+
+    fn require_comment(&self) {
+        assert!(
+            self.inner
+                .query_options
+                .comment
+                .as_deref()
+                .is_some_and(|comment| !comment.trim().is_empty()),
+            "query comment must not be empty"
+        );
     }
 
     pub async fn execute_for_page<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
         offset: u64,
         limit: u64,
-    ) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_page(ctx, offset, limit).await
+        self.into_inner_with_trace()
+            ._execute_for_page(context, offset, limit)
+            .await
     }
 
     pub async fn execute_for_exists<'a, C>(
         self,
-        ctx: &'a C,
+        context: &'a C,
     ) -> Result<bool, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_exists(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_exists(context)
+            .await
     }
 
-    pub async fn execute_for_list<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    pub async fn execute_for_list<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<R>,
+        crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_list(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_list(context)
+            .await
+    }
+
+    pub async fn execute_for_rows<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        teaql_core::SmartList<teaql_core::CompactRow>,
+        crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>,
+    >
+    where
+        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
+    {
+        self.into_inner_with_trace()
+            ._execute_for_rows(context)
+            .await
     }
 
     /// Execute query as a lazy entity stream without materializing the result set.
     /// Set chunk size via .stream(chunk_size) or .stream_default() on the query.
-    pub async fn execute_for_stream<'a, C>(self, ctx: &'a C) -> Result<crate::request_support::TeaqlEntityStream<'a, R, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    pub async fn execute_for_stream<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<
+        crate::request_support::TeaqlEntityStream<
+            'a,
+            R,
+            crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>,
+        >,
+        crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>,
+    >
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
         R: teaql_core::Entity + 'a,
     {
-        self.into_inner_with_trace()._execute_for_stream(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_stream(context)
+            .await
     }
 
-    pub async fn execute_for_first<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    pub async fn execute_for_first<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_first(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_first(context)
+            .await
     }
 
-    pub async fn execute_for_one<'a, C>(self, ctx: &'a C) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    pub async fn execute_for_one<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<Option<R>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_one(ctx).await
+        self.into_inner_with_trace()._execute_for_one(context).await
     }
 
-
-    pub async fn execute_for_records<'a, C>(self, ctx: &'a C) -> Result<teaql_core::SmartList<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
+    pub async fn execute_for_count<'a, C>(
+        self,
+        context: &'a C,
+    ) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
     where
         C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
     {
-        self.into_inner_with_trace()._execute_for_records(ctx).await
-    }
-
-    pub async fn execute_for_record<'a, C>(self, ctx: &'a C) -> Result<Option<teaql_core::Record>, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_record(ctx).await
-    }
-
-    pub async fn execute_for_count<'a, C>(self, ctx: &'a C) -> Result<u64, crate::request_support::TeaqlDataServiceError<C::TenantRepository<'a>>>
-    where
-        C: crate::request_support::TeaqlRepositoryProvider + ?Sized,
-    {
-        self.into_inner_with_trace()._execute_for_count(ctx).await
+        self.into_inner_with_trace()
+            ._execute_for_count(context)
+            .await
     }
 }

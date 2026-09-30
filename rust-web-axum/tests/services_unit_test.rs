@@ -1,21 +1,25 @@
-use teaql_registry_core::{service_runtime, ServiceRuntimeConfig};
+#![recursion_limit = "256"]
+
+mod common;
+
 use teaql_registry::services::{
     AssetService, BlobStoreService, ComponentService, RepositoryService, SecurityService,
 };
+use teaql_registry_core::service_runtime;
 
 async fn get_test_runtime() -> teaql_registry_core::ServiceRuntime {
-    let config = ServiceRuntimeConfig {
-        database_url: "postgresql://postgres:postgres@localhost:5432/nexus_db".to_string(),
-        database_user: "postgres".to_string(),
-        database_password: "postgres".to_string(),
-    };
+    let config = common::runtime_config();
     let runtime = service_runtime(config).await.expect("connect error");
     runtime.ensure_schema().await.expect("schema error");
     runtime
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_blob_store_service() {
+#[test]
+fn test_blob_store_service() {
+    common::run_with_large_stack(test_blob_store_service_body);
+}
+
+async fn test_blob_store_service_body() {
     let runtime = get_test_runtime().await;
 
     let unique_name = format!("bs-{}", uuid::Uuid::new_v4().simple());
@@ -36,8 +40,12 @@ async fn test_blob_store_service() {
     assert!(all.iter().any(|b| b.name() == unique_name));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_repository_service() {
+#[test]
+fn test_repository_service() {
+    common::run_with_large_stack(test_repository_service_body);
+}
+
+async fn test_repository_service_body() {
     let runtime = get_test_runtime().await;
 
     let bs = BlobStoreService::create(
@@ -65,7 +73,7 @@ async fn test_repository_service() {
     .expect("create repo failed");
 
     assert_eq!(repo.name(), repo_name);
-    assert_eq!(repo.online(), true);
+    assert!(repo.online());
 
     let found = RepositoryService::find_by_name(&runtime, &repo_name)
         .await
@@ -80,8 +88,12 @@ async fn test_repository_service() {
     assert_eq!(cr.unwrap().format_name(), "MAVEN2");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_security_service() {
+#[test]
+fn test_security_service() {
+    common::run_with_large_stack(test_security_service_body);
+}
+
+async fn test_security_service_body() {
     let runtime = get_test_runtime().await;
 
     let username = format!("user-{}", uuid::Uuid::new_v4().simple());
@@ -109,9 +121,15 @@ async fn test_security_service() {
     assert!(users.iter().any(|u| u.username() == username));
 
     let unique_role_id = format!("role-{}", uuid::Uuid::new_v4().simple());
-    SecurityService::create_role(&runtime, &unique_role_id, "Test Role", "Test Description", false)
-        .await
-        .expect("create_role failed");
+    SecurityService::create_role(
+        &runtime,
+        &unique_role_id,
+        "Test Role",
+        "Test Description",
+        false,
+    )
+    .await
+    .expect("create_role failed");
 
     let roles = SecurityService::list_roles(&runtime).await.unwrap();
     assert!(roles.iter().any(|r| r.role_id() == unique_role_id));
@@ -133,8 +151,12 @@ async fn test_security_service() {
     assert!(privs.iter().any(|p| p.privilege_id() == unique_priv_id));
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_component_and_asset_service() {
+#[test]
+fn test_component_and_asset_service() {
+    common::run_with_large_stack(test_component_and_asset_service_body);
+}
+
+async fn test_component_and_asset_service_body() {
     let runtime = get_test_runtime().await;
 
     let bs = BlobStoreService::create(

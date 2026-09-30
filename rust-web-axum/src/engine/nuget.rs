@@ -21,7 +21,8 @@ impl NuGetEngine {
         version: &str,
         nupkg_data: &[u8],
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "nuget").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "nuget").await?;
         let blob_info = blobstore.create_blob(nupkg_data).await?;
 
         let id_lower = id.to_lowercase();
@@ -49,7 +50,10 @@ impl NuGetEngine {
         )
         .await?;
 
-        let path = format!("/v3/flatcontainer/{}/{}/{}.{}.nupkg", id_lower, ver_lower, id_lower, ver_lower);
+        let path = format!(
+            "/v3/flatcontainer/{}/{}/{}.{}.nupkg",
+            id_lower, ver_lower, id_lower, ver_lower
+        );
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),
@@ -74,14 +78,21 @@ impl NuGetEngine {
         };
 
         let id_lower = id.to_lowercase();
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
-        let matching: Vec<_> = comps.into_iter().filter(|c| c.name().to_lowercase() == id_lower).collect();
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let matching: Vec<_> = comps
+            .into_iter()
+            .filter(|c| c.name().to_lowercase() == id_lower)
+            .collect();
 
         if matching.is_empty() {
             return Ok(None);
         }
 
-        let versions: Vec<String> = matching.into_iter().map(|c| c.version_name().to_string()).collect();
+        let versions: Vec<String> = matching
+            .into_iter()
+            .map(|c| c.version_name().to_string())
+            .collect();
         Ok(Some(NuGetPackageVersions { versions }))
     }
 
@@ -99,7 +110,10 @@ impl NuGetEngine {
 
         let id_lower = id.to_lowercase();
         let ver_lower = version.to_lowercase();
-        let path = format!("/v3/flatcontainer/{}/{}/{}.{}.nupkg", id_lower, ver_lower, id_lower, ver_lower);
+        let path = format!(
+            "/v3/flatcontainer/{}/{}/{}.{}.nupkg",
+            id_lower, ver_lower, id_lower, ver_lower
+        );
 
         let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
             Some(a) => a,

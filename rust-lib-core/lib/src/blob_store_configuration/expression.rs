@@ -5,7 +5,10 @@ pub struct BlobStoreConfigurationExpression<'a> {
 }
 
 impl<'a> BlobStoreConfigurationExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a crate::BlobStoreConfiguration>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<&'a crate::BlobStoreConfiguration>,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -13,9 +16,10 @@ impl<'a> BlobStoreConfigurationExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -24,7 +28,8 @@ impl<'a> BlobStoreConfigurationExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a crate::BlobStoreConfiguration {
-        self.resolve().expect("Relation was legitimately null in database!")
+        self.resolve()
+            .expect("Relation was legitimately null in database!")
     }
 
     pub fn get_id(self) -> crate::ValueExpression<'a, u64> {
@@ -43,41 +48,58 @@ impl<'a> BlobStoreConfigurationExpression<'a> {
     }
 
     pub fn get_total_size(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("total_size", |entity| entity.eval_total_size());
+        let next = self
+            .result
+            .and_then("total_size", |entity| entity.eval_total_size());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_blob_count(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("blob_count", |entity| entity.eval_blob_count());
+        let next = self
+            .result
+            .and_then("blob_count", |entity| entity.eval_blob_count());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_version(self) -> crate::ValueExpression<'a, i64> {
-        let next = self.result.and_then("version", |entity| entity.eval_version());
+        let next = self
+            .result
+            .and_then("version", |entity| entity.eval_version());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_tenant_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("tenant_id", |entity| entity.eval_tenant_id());
+        let next = self
+            .result
+            .and_then("tenant_id", |entity| entity.eval_tenant_id());
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_blob_store_type_id(self) -> crate::ValueExpression<'a, u64> {
-        let next = self.result.and_then("blob_store_type_id", |entity| entity.eval_blob_store_type_id());
+        let next = self.result.and_then("blob_store_type_id", |entity| {
+            entity.eval_blob_store_type_id()
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
     pub fn get_tenant(self) -> crate::TenantExpression<'a> {
-        let next = self.result.and_then("tenant", |entity| entity.eval_tenant());
+        let next = self
+            .result
+            .and_then("tenant", |entity| entity.eval_tenant());
         crate::TenantExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_blob_store_type(self) -> crate::BlobStoreTypeExpression<'a> {
-        let next = self.result.and_then("blob_store_type", |entity| entity.eval_blob_store_type());
+        let next = self
+            .result
+            .and_then("blob_store_type", |entity| entity.eval_blob_store_type());
         crate::BlobStoreTypeExpression::new(next, self.root_desc.clone())
     }
     pub fn blob_store_type_is_file(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("blob_store_type_id", |entity| {
             if !entity.is_loaded("blob_store_type_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "blob_store_type_id".to_string(), attempted_path: "blob_store_type_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "blob_store_type_id".to_string(),
+                    attempted_path: "blob_store_type_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.blob_store_type_is_file())
             }
@@ -88,20 +110,31 @@ impl<'a> BlobStoreConfigurationExpression<'a> {
     pub fn blob_store_type_is_s3(self) -> crate::ValueExpression<'a, bool> {
         let next = self.result.and_then("blob_store_type_id", |entity| {
             if !entity.is_loaded("blob_store_type_id") {
-                teaql_core::eval::EvalResult::NotLoaded { failed_node: "blob_store_type_id".to_string(), attempted_path: "blob_store_type_id".to_string() }
+                teaql_core::eval::EvalResult::NotLoaded {
+                    failed_node: "blob_store_type_id".to_string(),
+                    attempted_path: "blob_store_type_id".to_string(),
+                }
             } else {
                 teaql_core::eval::EvalResult::Value(entity.blob_store_type_is_s3())
             }
         });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
-    pub fn get_repository_configuration_list(self) -> crate::RepositoryConfigurationListExpression<'a> {
-        let next = self.result.and_then("repository_configuration_list", |entity| entity.eval_repository_configuration_list());
+    pub fn get_repository_configuration_list(
+        self,
+    ) -> crate::RepositoryConfigurationListExpression<'a> {
+        let next = self
+            .result
+            .and_then("repository_configuration_list", |entity| {
+                entity.eval_repository_configuration_list()
+            });
         crate::RepositoryConfigurationListExpression::new(next, self.root_desc.clone())
     }
 
     pub fn get_asset_blob_list(self) -> crate::AssetBlobListExpression<'a> {
-        let next = self.result.and_then("asset_blob_list", |entity| entity.eval_asset_blob_list());
+        let next = self
+            .result
+            .and_then("asset_blob_list", |entity| entity.eval_asset_blob_list());
         crate::AssetBlobListExpression::new(next, self.root_desc.clone())
     }
 }
@@ -113,7 +146,12 @@ pub struct BlobStoreConfigurationListExpression<'a> {
 }
 
 impl<'a> BlobStoreConfigurationListExpression<'a> {
-    pub fn new(result: teaql_core::eval::EvalResult<&'a teaql_core::SmartList<crate::BlobStoreConfiguration>>, root_desc: std::sync::Arc<String>) -> Self {
+    pub fn new(
+        result: teaql_core::eval::EvalResult<
+            &'a teaql_core::SmartList<crate::BlobStoreConfiguration>,
+        >,
+        root_desc: std::sync::Arc<String>,
+    ) -> Self {
         Self { result, root_desc }
     }
 
@@ -121,9 +159,10 @@ impl<'a> BlobStoreConfigurationListExpression<'a> {
         match &self.result {
             teaql_core::eval::EvalResult::Value(v) => Some(*v),
             teaql_core::eval::EvalResult::Null => None,
-            teaql_core::eval::EvalResult::NotLoaded { failed_node, attempted_path } => {
-                crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path)
-            }
+            teaql_core::eval::EvalResult::NotLoaded {
+                failed_node,
+                attempted_path,
+            } => crate::trigger_logic_bug_panic(&self.root_desc, &failed_node, &attempted_path),
         }
     }
 
@@ -132,11 +171,14 @@ impl<'a> BlobStoreConfigurationListExpression<'a> {
     }
 
     pub fn unwrap(&self) -> &'a teaql_core::SmartList<crate::BlobStoreConfiguration> {
-        self.resolve().expect("List relation was legitimately null in database!")
+        self.resolve()
+            .expect("List relation was legitimately null in database!")
     }
 
     pub fn size(&self) -> crate::ValueExpression<'a, usize> {
-        let next = self.result.clone().and_then("size", |list| teaql_core::eval::EvalResult::Value(list.len()));
+        let next = self.result.clone().and_then("size", |list| {
+            teaql_core::eval::EvalResult::Value(list.len())
+        });
         crate::ValueExpression::new(next, self.root_desc.clone())
     }
 

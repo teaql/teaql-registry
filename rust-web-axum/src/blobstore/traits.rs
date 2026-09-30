@@ -1,6 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures_util::Stream;
+use std::pin::Pin;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +19,9 @@ pub struct BlobInfo {
     pub size: i64,
     pub checksums: BlobChecksums,
 }
+
+/// A stream of byte chunks for streaming blob upload/download.
+pub type ByteStream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send>>;
 
 #[async_trait]
 pub trait BlobStore: Send + Sync {
@@ -37,6 +42,24 @@ pub trait BlobStore: Send + Sync {
 
     /// Name/label of this blobstore instance
     fn store_name(&self) -> &str;
+
+    /// Create blob from a byte stream. Default impl collects all chunks then calls create_blob.
+    async fn create_blob_from_stream(&self, mut stream: ByteStream) -> Result<BlobInfo> {
+        use futures_util::StreamExt;
+        let mut buf = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            buf.extend_from_slice(&chunk.map_err(|e| anyhow::anyhow!("stream read error: {}", e))?);
+        }
+        self.create_blob(&buf).await
+    }
+
+    /// Read blob as a byte stream. Default impl reads full blob then wraps as single-chunk stream.
+    async fn read_blob_stream(&self, blob_ref: &str) -> Result<ByteStream> {
+        let data = self.read_blob(blob_ref).await?;
+        Ok(Box::pin(futures_util::stream::once(
+            async move { Ok(data) },
+        )))
+    }
 }
 
 #[async_trait]
@@ -59,6 +82,12 @@ impl<T: ?Sized + BlobStore> BlobStore for Arc<T> {
     fn store_name(&self) -> &str {
         (**self).store_name()
     }
+    async fn create_blob_from_stream(&self, stream: ByteStream) -> Result<BlobInfo> {
+        (**self).create_blob_from_stream(stream).await
+    }
+    async fn read_blob_stream(&self, blob_ref: &str) -> Result<ByteStream> {
+        (**self).read_blob_stream(blob_ref).await
+    }
 }
 
 #[async_trait]
@@ -80,5 +109,11 @@ impl<T: ?Sized + BlobStore> BlobStore for Box<T> {
     }
     fn store_name(&self) -> &str {
         (**self).store_name()
+    }
+    async fn create_blob_from_stream(&self, stream: ByteStream) -> Result<BlobInfo> {
+        (**self).create_blob_from_stream(stream).await
+    }
+    async fn read_blob_stream(&self, blob_ref: &str) -> Result<ByteStream> {
+        (**self).read_blob_stream(blob_ref).await
     }
 }

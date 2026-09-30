@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
-use crate::blobstore::BlobStore;
+use crate::blobstore::{BlobInfo, BlobStore, ByteStream};
 use crate::format::pypi::{
     generate_pypi_simple_package_html, generate_pypi_simple_root_html, PyPiFileEntry,
 };
@@ -20,8 +20,42 @@ impl PyPiEngine {
         filename: &str,
         data: &[u8],
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "pypi").await?;
-        let blob_info = blobstore.create_blob(data).await?;
+        let data = Bytes::copy_from_slice(data);
+        Self::upload_file_from_stream(
+            ctx,
+            repo,
+            blobstore,
+            project_name,
+            version,
+            filename,
+            Box::pin(futures_util::stream::once(async move { Ok(data) })),
+        )
+        .await
+    }
+
+    pub async fn upload_file_from_stream(
+        ctx: &ServiceRuntime,
+        repo: &RepositoryConfiguration,
+        blobstore: &dyn BlobStore,
+        project_name: &str,
+        version: &str,
+        filename: &str,
+        stream: ByteStream,
+    ) -> Result<()> {
+        let blob_info = blobstore.create_blob_from_stream(stream).await?;
+        Self::register_uploaded_file(ctx, repo, project_name, version, filename, blob_info).await
+    }
+
+    async fn register_uploaded_file(
+        ctx: &ServiceRuntime,
+        repo: &RepositoryConfiguration,
+        project_name: &str,
+        version: &str,
+        filename: &str,
+        blob_info: BlobInfo,
+    ) -> Result<()> {
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "pypi").await?;
 
         let ct = if filename.ends_with(".whl") {
             "application/x-wheel+zip"
@@ -47,7 +81,11 @@ impl PyPiEngine {
             "",
             project_name,
             version,
-            if filename.ends_with(".whl") { "whl" } else { "tar.gz" },
+            if filename.ends_with(".whl") {
+                "whl"
+            } else {
+                "tar.gz"
+            },
         )
         .await?;
 
@@ -74,7 +112,8 @@ impl PyPiEngine {
             None => return Ok(generate_pypi_simple_root_html(&[])),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 1000, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 1000, 0).await?;
         let mut names: Vec<String> = comps.into_iter().map(|c| c.name().to_string()).collect();
         names.sort();
         names.dedup();
@@ -92,14 +131,19 @@ impl PyPiEngine {
             None => return Ok(None),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
-        let matching: Vec<_> = comps.into_iter().filter(|c| c.name().eq_ignore_ascii_case(project_name)).collect();
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let matching: Vec<_> = comps
+            .into_iter()
+            .filter(|c| c.name().eq_ignore_ascii_case(project_name))
+            .collect();
 
         if matching.is_empty() {
             return Ok(None);
         }
 
-        let assets = AssetService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let assets =
+            AssetService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let mut files = Vec::new();
 
         for a in assets {
@@ -116,7 +160,10 @@ impl PyPiEngine {
             }
         }
 
-        Ok(Some(generate_pypi_simple_package_html(project_name, &files)))
+        Ok(Some(generate_pypi_simple_package_html(
+            project_name,
+            &files,
+        )))
     }
 
     pub async fn get_package_file(

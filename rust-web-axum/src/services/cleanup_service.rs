@@ -51,7 +51,7 @@ impl CleanupService {
         for (_key, mut comp_list) in grouped_by_name {
             if let Some(max_versions) = policy.max_versions_per_component {
                 // Sort newest to oldest by version or ID
-                comp_list.sort_by(|a, b| b.id().cmp(&a.id()));
+                comp_list.sort_by_key(|component| std::cmp::Reverse(component.id()));
 
                 if comp_list.len() > max_versions {
                     let to_delete = &comp_list[max_versions..];
@@ -62,7 +62,9 @@ impl CleanupService {
 
                         let assets = AssetService::list_by_component(ctx, comp.id()).await?;
                         for asset in assets {
-                            if let Ok(Some(blob)) = AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await {
+                            if let Ok(Some(blob)) =
+                                AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await
+                            {
                                 report.freed_bytes += blob.blob_size();
                                 let _ = blobstore.delete_blob(&blob.blob_ref()).await;
                                 let _ = AssetService::delete_asset_blob(ctx, blob.id()).await;
@@ -73,7 +75,11 @@ impl CleanupService {
 
                         let _ = ComponentService::delete(ctx, comp.id()).await;
                         report.deleted_components_count += 1;
-                        info!("Cleaned up old component version: {}/{}", comp.name(), comp.version_name());
+                        info!(
+                            "Cleaned up old component version: {}/{}",
+                            comp.name(),
+                            comp.version_name()
+                        );
                     }
                 }
             }

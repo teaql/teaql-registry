@@ -5,12 +5,12 @@
         <server>
             <id>teaql-releases</id>
             <username>admin</username>
-            <password>admin123</password>
+            <password>${env.TEAQL_REGISTRY_ADMIN_PASSWORD}</password>
         </server>
         <server>
             <id>teaql-snapshots</id>
             <username>admin</username>
-            <password>admin123</password>
+            <password>${env.TEAQL_REGISTRY_ADMIN_PASSWORD}</password>
         </server>
     </servers>
 </settings>

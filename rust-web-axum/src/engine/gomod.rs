@@ -3,7 +3,6 @@ use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
-use crate::format::gomod::GoModuleVersionInfo;
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
 pub struct GoModEngine;
@@ -18,12 +17,14 @@ impl GoModEngine {
         ext: &str,
         data: &[u8],
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "gomod").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "gomod").await?;
         let blob_info = blobstore.create_blob(data).await?;
 
         let ct = match ext {
             "zip" => "application/zip",
-            "mod" | "info" => "text/plain; charset=utf-8",
+            "info" => "application/json",
+            "mod" => "text/plain; charset=utf-8",
             _ => "application/octet-stream",
         };
 
@@ -39,15 +40,9 @@ impl GoModEngine {
         )
         .await?;
 
-        let comp = ComponentService::find_or_create(
-            ctx,
-            content_repo.id(),
-            "",
-            module,
-            version,
-            ext,
-        )
-        .await?;
+        let comp =
+            ComponentService::find_or_create(ctx, content_repo.id(), "", module, version, ext)
+                .await?;
 
         let path = format!("/{}/@v/{}.{}", module, version, ext);
         AssetService::upsert_asset(
@@ -73,7 +68,8 @@ impl GoModEngine {
             None => return Ok(String::new()),
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let mut vers: Vec<String> = comps
             .into_iter()
             .filter(|c| c.name() == module && !c.version_name().is_empty())
@@ -83,28 +79,6 @@ impl GoModEngine {
         vers.sort();
         vers.dedup();
         Ok(vers.join("\n"))
-    }
-
-    pub async fn get_version_info(
-        ctx: &ServiceRuntime,
-        repo: &RepositoryConfiguration,
-        module: &str,
-        version: &str,
-    ) -> Result<Option<GoModuleVersionInfo>> {
-        let content_repo = match RepositoryService::get_content_repository(ctx, repo.id()).await? {
-            Some(cr) => cr,
-            None => return Ok(None),
-        };
-
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
-        if comps.iter().any(|c| c.name() == module && c.version_name() == version) {
-            Ok(Some(GoModuleVersionInfo {
-                version: version.to_string(),
-                time: "2026-08-14T10:00:00Z".to_string(),
-            }))
-        } else {
-            Ok(None)
-        }
     }
 
     pub async fn get_file(
@@ -118,7 +92,11 @@ impl GoModEngine {
             None => return Ok(None),
         };
 
-        let clean_path = if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+        let clean_path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        };
         let asset = match AssetService::find_by_path(ctx, content_repo.id(), &clean_path).await? {
             Some(a) => a,
             None => return Ok(None),

@@ -1,0 +1,4 @@
+    Updating `teaql` index
+     Locking 1 package to latest compatible version
+ Downloading crates ...
+  Downloaded teaql-native-probe-20260909-native-clients v0.0.1 (registry `teaql`)

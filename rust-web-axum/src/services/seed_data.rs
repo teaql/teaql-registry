@@ -43,7 +43,8 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
 
     // 2. NPM Demo Package
     if let Some(repo) = RepositoryService::find_by_name(ctx, "npm-hosted").await? {
-        let npm_tarball = b"PK\x03\x04\x14\x00\x00\x00NPM sample tarball binary payload @teaql/sample-utils";
+        let npm_tarball =
+            b"PK\x03\x04\x14\x00\x00\x00NPM sample tarball binary payload @teaql/sample-utils";
         HostedEngine::handle_put(
             ctx,
             &repo,
@@ -55,7 +56,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         .await?;
 
         // Create NPM component entry
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -71,7 +74,8 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
 
     // 3. PyPI Demo Package
     if let Some(repo) = RepositoryService::find_by_name(ctx, "pypi-hosted").await? {
-        let pypi_wheel = b"PK\x03\x04\x14\x00\x00\x00Python Wheel Binary Payload teaql-client-1.0.0";
+        let pypi_wheel =
+            b"PK\x03\x04\x14\x00\x00\x00Python Wheel Binary Payload teaql-client-1.0.0";
         HostedEngine::handle_put(
             ctx,
             &repo,
@@ -82,7 +86,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -124,7 +130,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -140,7 +148,8 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
 
     // 5. Cargo Demo Crate
     if let Some(repo) = RepositoryService::find_by_name(ctx, "cargo-hosted").await? {
-        let crate_bytes = b"PK\x03\x04\x14\x00\x00\x00Rust Crate Archive teaql-core-demo-0.1.0.crate";
+        let crate_bytes =
+            b"PK\x03\x04\x14\x00\x00\x00Rust Crate Archive teaql-core-demo-0.1.0.crate";
         HostedEngine::handle_put(
             ctx,
             &repo,
@@ -151,7 +160,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -201,7 +212,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -217,7 +230,8 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
 
     // 7. NuGet Demo Package
     if let Some(repo) = RepositoryService::find_by_name(ctx, "nuget-hosted").await? {
-        let nupkg_bytes = b"PK\x03\x04\x14\x00\x00\x00NuGet Package Archive TeaQL.SDK.DotNet.1.0.0.nupkg";
+        let nupkg_bytes =
+            b"PK\x03\x04\x14\x00\x00\x00NuGet Package Archive TeaQL.SDK.DotNet.1.0.0.nupkg";
         HostedEngine::handle_put(
             ctx,
             &repo,
@@ -228,7 +242,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -255,7 +271,9 @@ pub async fn seed_demo_artifacts(ctx: &ServiceRuntime, blobstore: &dyn BlobStore
         )
         .await?;
 
-        if let Some(content_repo) = RepositoryService::get_content_repository(ctx, repo.id()).await? {
+        if let Some(content_repo) =
+            RepositoryService::get_content_repository(ctx, repo.id()).await?
+        {
             let _ = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),

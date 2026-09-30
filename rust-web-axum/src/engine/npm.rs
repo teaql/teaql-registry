@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use bytes::Bytes;
-use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
 use crate::format::npm::{NpmDist, NpmPackageDocument, NpmVersionDetail};
@@ -17,10 +17,12 @@ impl NpmEngine {
         blobstore: &dyn BlobStore,
         doc: &NpmPackageDocument,
     ) -> Result<()> {
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "npm").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "npm").await?;
 
         for (filename, attachment) in &doc.attachments {
-            let data = base64::engine::general_purpose::STANDARD.decode(&attachment.data)
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(&attachment.data)
                 .map_err(|e| anyhow!("Invalid base64 attachment data: {}", e))?;
 
             let blob_info = blobstore.create_blob(&data).await?;
@@ -30,7 +32,10 @@ impl NpmEngine {
                 repo.blob_store_id(),
                 &blob_info.blob_ref,
                 blob_info.size,
-                attachment.content_type.as_deref().unwrap_or("application/gzip"),
+                attachment
+                    .content_type
+                    .as_deref()
+                    .unwrap_or("application/gzip"),
                 &blob_info.checksums.sha1,
                 &blob_info.checksums.sha256,
                 &blob_info.checksums.md5,
@@ -41,7 +46,9 @@ impl NpmEngine {
             let version = doc
                 .versions
                 .iter()
-                .find(|(_, v)| v.dist.tarball.ends_with(filename) || filename.contains(v.version.as_str()))
+                .find(|(_, v)| {
+                    v.dist.tarball.ends_with(filename) || filename.contains(v.version.as_str())
+                })
                 .map(|(ver, _)| ver.as_str())
                 .unwrap_or("1.0.0");
 
@@ -61,7 +68,10 @@ impl NpmEngine {
             )
             .await?;
 
-            let path = format!("/{}/-/{}", doc.name, filename);
+            // npm may submit scoped attachment keys such as
+            // @scope/package-version.tgz. The download route has one tarball
+            // segment, so store the canonical basename returned in metadata.
+            let path = format!("/{}/-/{}-{}.tgz", doc.name, name, version);
             AssetService::upsert_asset(
                 ctx,
                 content_repo.id(),
@@ -93,7 +103,8 @@ impl NpmEngine {
             ("", package_name)
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let matching: Vec<_> = comps
             .into_iter()
             .filter(|c| c.name() == name && (namespace.is_empty() || c.namespace() == namespace))
@@ -110,7 +121,14 @@ impl NpmEngine {
         for c in matching {
             let ver = c.version_name().to_string();
             latest_ver = ver.clone();
-            let tarball_url = format!("{}/{}/-/{}-{}.tgz", base_url.trim_end_matches('/'), package_name, name, ver);
+            let encoded_package_name = package_name.replace('/', "%2F");
+            let tarball_url = format!(
+                "{}/{}/-/{}-{}.tgz",
+                base_url.trim_end_matches('/'),
+                encoded_package_name,
+                name,
+                ver
+            );
             versions.insert(
                 ver.clone(),
                 NpmVersionDetail {
@@ -149,7 +167,11 @@ impl NpmEngine {
             None => return Ok(None),
         };
 
-        let clean_path = if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+        let clean_path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        };
         let asset = match AssetService::find_by_path(ctx, content_repo.id(), &clean_path).await? {
             Some(a) => a,
             None => return Ok(None),

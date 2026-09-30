@@ -1,59 +1,98 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, LazyLock};
+use std::path::PathBuf;
+use std::sync::{Arc, LazyLock, Mutex};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
+use tokio::io::AsyncWriteExt;
 
-use crate::blobstore::BlobStore;
-use crate::format::docker::{
-    compute_sha256_digest, DOCKER_MANIFEST_V2_MEDIA_TYPE,
-};
+use crate::blobstore::{BlobStore, ByteStream};
+use crate::format::docker::{compute_sha256_digest, DOCKER_MANIFEST_V2_MEDIA_TYPE};
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
-static UPLOAD_SESSIONS: LazyLock<Arc<Mutex<HashMap<String, Vec<u8>>>>> =
+struct UploadSession {
+    path: PathBuf,
+    size: i64,
+}
+
+type SharedUploadSession = Arc<tokio::sync::Mutex<UploadSession>>;
+type UploadSessions = Arc<Mutex<HashMap<String, SharedUploadSession>>>;
+
+static UPLOAD_SESSIONS: LazyLock<UploadSessions> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 pub struct DockerEngine;
 
 impl DockerEngine {
-    pub fn start_upload(_image_name: &str) -> String {
+    pub async fn start_upload(_image_name: &str) -> Result<String> {
         let upload_uuid = uuid::Uuid::new_v4().to_string();
-        let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
-        sessions.insert(upload_uuid.clone(), Vec::new());
-        upload_uuid
+        let path = std::env::temp_dir().join(format!("teaql-docker-{upload_uuid}.upload"));
+        tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .await?;
+        let mut sessions = UPLOAD_SESSIONS.lock().expect("lock poisoned");
+        sessions.insert(
+            upload_uuid.clone(),
+            Arc::new(tokio::sync::Mutex::new(UploadSession { path, size: 0 })),
+        );
+        Ok(upload_uuid)
     }
 
-    pub fn append_chunk(upload_uuid: &str, chunk: &[u8]) -> Result<usize> {
-        let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
-        let buf = sessions
-            .get_mut(upload_uuid)
+    pub async fn append_chunk(upload_uuid: &str, stream: ByteStream) -> Result<i64> {
+        let session = UPLOAD_SESSIONS
+            .lock()
+            .expect("lock poisoned")
+            .get(upload_uuid)
+            .cloned()
             .ok_or_else(|| anyhow!("Upload session not found: {}", upload_uuid))?;
-        buf.extend_from_slice(chunk);
-        Ok(buf.len())
+        Self::append_to_session(&session, stream).await
     }
 
-    pub async fn finish_upload(
+    pub async fn cancel_upload(upload_uuid: &str) {
+        let session = UPLOAD_SESSIONS
+            .lock()
+            .expect("lock poisoned")
+            .remove(upload_uuid);
+        if let Some(session) = session {
+            let path = session.lock().await.path.clone();
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+
+    async fn append_to_session(
+        session: &SharedUploadSession,
+        mut stream: ByteStream,
+    ) -> Result<i64> {
+        use futures_util::StreamExt;
+
+        let mut session = session.lock().await;
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&session.path)
+            .await?;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| anyhow!("stream read error: {error}"))?;
+            file.write_all(&chunk).await?;
+            session.size += chunk.len() as i64;
+        }
+        file.flush().await?;
+        Ok(session.size)
+    }
+
+    pub async fn store_blob_stream(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
         blobstore: &dyn BlobStore,
         image_name: &str,
-        upload_uuid: &str,
         expected_digest: &str,
-        extra_data: Option<&[u8]>,
-    ) -> Result<String> {
-        let mut data = {
-            let mut sessions = UPLOAD_SESSIONS.lock().unwrap();
-            sessions
-                .remove(upload_uuid)
-                .unwrap_or_default()
-        };
-
-        if let Some(extra) = extra_data {
-            data.extend_from_slice(extra);
-        }
-
-        let computed_digest = compute_sha256_digest(&data);
+        stream: ByteStream,
+    ) -> Result<(String, i64)> {
+        let blob_info = blobstore.create_blob_from_stream(stream).await?;
+        let computed_digest = format!("sha256:{}", blob_info.checksums.sha256);
         if !expected_digest.is_empty() && expected_digest != computed_digest {
+            let _ = blobstore.delete_blob(&blob_info.blob_ref).await;
             return Err(anyhow!(
                 "Digest mismatch: expected {}, computed {}",
                 expected_digest,
@@ -61,10 +100,8 @@ impl DockerEngine {
             ));
         }
 
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
-
-        // Write binary to BlobStore
-        let blob_info = blobstore.create_blob(&data).await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
 
         // Save AssetBlob record in PostgreSQL via TeaQL
         let asset_blob = AssetService::create_asset_blob(
@@ -91,7 +128,49 @@ impl DockerEngine {
         )
         .await?;
 
-        Ok(computed_digest)
+        Ok((computed_digest, blob_info.size))
+    }
+
+    pub async fn finish_upload(
+        ctx: &ServiceRuntime,
+        repo: &RepositoryConfiguration,
+        blobstore: &dyn BlobStore,
+        image_name: &str,
+        upload_uuid: &str,
+        expected_digest: &str,
+        extra_data: Option<ByteStream>,
+    ) -> Result<(String, i64)> {
+        let session = UPLOAD_SESSIONS
+            .lock()
+            .expect("lock poisoned")
+            .remove(upload_uuid)
+            .ok_or_else(|| anyhow!("Upload session not found: {}", upload_uuid))?;
+
+        if let Some(stream) = extra_data {
+            if let Err(error) = Self::append_to_session(&session, stream).await {
+                let path = session.lock().await.path.clone();
+                let _ = tokio::fs::remove_file(path).await;
+                return Err(error);
+            }
+        }
+
+        let path = session.lock().await.path.clone();
+        let result = async {
+            let file = tokio::fs::File::open(&path).await?;
+            let stream = tokio_util::io::ReaderStream::new(tokio::io::BufReader::new(file));
+            Self::store_blob_stream(
+                ctx,
+                repo,
+                blobstore,
+                image_name,
+                expected_digest,
+                Box::pin(stream),
+            )
+            .await
+        }
+        .await;
+        let _ = tokio::fs::remove_file(path).await;
+        result
     }
 
     pub async fn get_blob(
@@ -145,7 +224,10 @@ impl DockerEngine {
             None => return Ok(None),
         };
 
-        Ok(Some((asset_blob.blob_size(), asset_blob.content_type().to_string())))
+        Ok(Some((
+            asset_blob.blob_size(),
+            asset_blob.content_type().to_string(),
+        )))
     }
 
     pub async fn put_manifest(
@@ -158,7 +240,8 @@ impl DockerEngine {
         content_type: &str,
     ) -> Result<String> {
         let digest = compute_sha256_digest(manifest_data);
-        let content_repo = RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
+        let content_repo =
+            RepositoryService::ensure_content_repository(ctx, repo.id(), "docker").await?;
 
         // Write binary to BlobStore
         let blob_info = blobstore.create_blob(manifest_data).await?;
@@ -275,7 +358,8 @@ impl DockerEngine {
             ("", image_name)
         };
 
-        let comps = ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+        let comps =
+            ComponentService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
         let tags: Vec<String> = comps
             .into_iter()
             .filter(|c| c.name() == name && (namespace.is_empty() || c.namespace() == namespace))

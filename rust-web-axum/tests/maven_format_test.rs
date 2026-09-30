@@ -1,6 +1,6 @@
-use teaql_registry::format::maven::{
-    generate_maven_metadata_xml, parse_maven_path,
-};
+#![recursion_limit = "256"]
+
+use teaql_registry::format::maven::{generate_maven_metadata_xml, parse_maven_path};
 
 #[test]
 fn test_parse_standard_release_jar() {

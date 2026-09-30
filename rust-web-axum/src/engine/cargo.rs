@@ -17,6 +17,7 @@ impl CargoEngine {
                 repo_url.trim_end_matches('/')
             ),
             api: repo_url.trim_end_matches('/').to_string(),
+            auth_required: true,
         }
     }
 
