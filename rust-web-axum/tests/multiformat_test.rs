@@ -61,6 +61,11 @@ async fn setup_multiformat_test_app() -> axum::Router {
         ("cargo-hosted", "CARGO"),
         ("nuget-hosted", "NUGET"),
         ("swift-hosted", "SWIFT"),
+        ("dart-hosted", "DART"),
+        ("rubygems-hosted", "RUBYGEMS"),
+        ("composer-hosted", "COMPOSER"),
+        ("conan-hosted", "CONAN"),
+        ("hex-hosted", "HEX"),
     ];
 
     for (name, fmt) in format_repos {
@@ -82,6 +87,333 @@ async fn setup_multiformat_test_app() -> axum::Router {
     }
 
     build_app(AppState::new(runtime, blobstore))
+}
+
+fn dart_package_archive(name: &str, version: &str) -> Vec<u8> {
+    use flate2::{write::GzEncoder, Compression};
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    {
+        let mut builder = tar::Builder::new(&mut encoder);
+        let pubspec = format!(
+            "name: {name}\nversion: {version}\ndescription: TeaQL Dart registry probe\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n"
+        );
+        let mut header = tar::Header::new_gnu();
+        header.set_size(pubspec.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "pubspec.yaml", pubspec.as_bytes())
+            .unwrap();
+        builder.finish().unwrap();
+    }
+    encoder.finish().unwrap()
+}
+
+fn ruby_gem_archive(name: &str, version: &str) -> Vec<u8> {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+
+    let metadata = format!(
+        "--- !ruby/object:Gem::Specification\nname: {name}\nversion: !ruby/object:Gem::Version\n  version: {version}\nplatform: ruby\n"
+    );
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(metadata.as_bytes()).unwrap();
+    let metadata_gz = encoder.finish().unwrap();
+    let mut gem = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut gem);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(metadata_gz.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "metadata.gz", &metadata_gz[..])
+            .unwrap();
+        builder.finish().unwrap();
+    }
+    gem
+}
+
+fn composer_package_archive(name: &str) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    writer
+        .start_file(
+            "package/composer.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+    writer
+        .write_all(
+            serde_json::json!({
+                "name": name,
+                "description": "TeaQL Composer registry probe",
+                "type": "library",
+                "autoload": { "psr-4": { "TeaQL\\Probe\\": "src/" } }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    writer.finish().unwrap().into_inner()
+}
+
+fn hex_package_archive(name: &str, version: &str) -> Vec<u8> {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+
+    let metadata = format!(
+        "{{<<\"app\">>,<<\"{name}\">>}}.\n\
+         {{<<\"build_tools\">>,[<<\"mix\">>]}}.\n\
+         {{<<\"description\">>,<<\"TeaQL Hex registry probe\">>}}.\n\
+         {{<<\"files\">>,[<<\"mix.exs\">>]}}.\n\
+         {{<<\"licenses\">>,[<<\"Apache-2.0\">>]}}.\n\
+         {{<<\"name\">>,<<\"{name}\">>}}.\n\
+         {{<<\"requirements\">>,[]}}.\n\
+         {{<<\"version\">>,<<\"{version}\">>}}.\n"
+    );
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(b"hex package contents").unwrap();
+    let contents = encoder.finish().unwrap();
+    let mut inner = sha2::Sha256::new();
+    inner.update(b"3");
+    inner.update(metadata.as_bytes());
+    inner.update(&contents);
+    let checksum = hex::encode_upper(inner.finalize());
+    let mut archive = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut archive);
+        for (path, data) in [
+            ("VERSION", b"3".as_slice()),
+            ("CHECKSUM", checksum.as_bytes()),
+            ("metadata.config", metadata.as_bytes()),
+            ("contents.tar.gz", contents.as_slice()),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, path, data).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    archive
+}
+
+#[test]
+fn test_dart_pub_registry_lifecycle() {
+    common::run_with_large_stack(dart_pub_registry_lifecycle_body);
+}
+
+async fn dart_pub_registry_lifecycle_body() {
+    let app = setup_multiformat_test_app().await;
+    let package = format!("teaql_probe_{}", uuid::Uuid::new_v4().simple());
+    let archive = dart_package_archive(&package, "1.2.3");
+
+    let new_upload = Request::builder()
+        .uri("/repository/dart-hosted/dart/api/packages/versions/new")
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(new_upload).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let boundary = "teaql-dart-boundary";
+    let mut upload_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"package.tar.gz\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    upload_body.extend_from_slice(&archive);
+    upload_body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let upload = Request::builder()
+        .method(Method::POST)
+        .uri("/repository/dart-hosted/dart/api/packages/versions/newUpload")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
+        .body(axum::body::Body::from(upload_body.clone()))
+        .unwrap();
+    let response = app.clone().oneshot(upload).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let finalize_url = response.headers()[header::LOCATION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(finalize_url.contains("newUpload/complete"));
+    let finalize = Request::builder()
+        .uri(
+            finalize_url
+                .strip_prefix("https://registry.example.test:7443")
+                .unwrap(),
+        )
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(finalize).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    let duplicate = Request::builder()
+        .method(Method::POST)
+        .uri("/repository/dart-hosted/dart/api/packages/versions/newUpload")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(upload_body))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(duplicate).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+
+    let versions = Request::builder()
+        .uri(format!(
+            "/repository/dart-hosted/dart/api/packages/{package}"
+        ))
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(versions).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/vnd.pub.v2+json"
+    );
+    let json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json["latest"]["version"], "1.2.3");
+    assert_eq!(json["latest"]["pubspec"]["name"], package);
+    assert_eq!(
+        json["latest"]["archive_sha256"],
+        hex::encode(sha2::Sha256::digest(&archive))
+    );
+    assert!(json["latest"]["archive_url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://registry.example.test:7443/"));
+
+    let download = Request::builder()
+        .uri(format!(
+            "/repository/dart-hosted/dart/packages/{package}/versions/1.2.3.tar.gz"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        archive
+    );
+}
+
+#[test]
+fn test_rubygems_registry_lifecycle() {
+    common::run_with_large_stack(rubygems_registry_lifecycle_body);
+}
+
+async fn rubygems_registry_lifecycle_body() {
+    let app = setup_multiformat_test_app().await;
+    let gem_name = format!("teaql_probe_{}", uuid::Uuid::new_v4().simple());
+    let gem = ruby_gem_archive(&gem_name, "1.2.3");
+    let filename = format!("{gem_name}-1.2.3.gem");
+
+    let push = Request::builder()
+        .method(Method::POST)
+        .uri("/repository/rubygems-hosted/rubygems/api/v1/gems")
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(axum::body::Body::from(gem.clone()))
+        .unwrap();
+    let response = app.clone().oneshot(push).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let versions = Request::builder()
+        .uri("/repository/rubygems-hosted/rubygems/versions")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(versions).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().contains_key("repr-digest"));
+    let etag = response.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let versions = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(versions.contains(&format!("{gem_name} 1.2.3 ")));
+
+    let conditional = Request::builder()
+        .uri("/repository/rubygems-hosted/rubygems/versions")
+        .header(header::IF_NONE_MATCH, etag)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(conditional).await.unwrap().status(),
+        StatusCode::NOT_MODIFIED
+    );
+
+    let ranged = Request::builder()
+        .uri("/repository/rubygems-hosted/rubygems/versions")
+        .header(header::RANGE, "bytes=5-")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(ranged).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert!(response.headers().contains_key(header::CONTENT_RANGE));
+
+    let info = Request::builder()
+        .uri(format!(
+            "/repository/rubygems-hosted/rubygems/info/{gem_name}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(info).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let info = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(info.contains(&format!(
+        "checksum:{}",
+        hex::encode(sha2::Sha256::digest(&gem))
+    )));
+
+    let download = Request::builder()
+        .uri(format!(
+            "/repository/rubygems-hosted/rubygems/gems/{filename}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        gem
+    );
 }
 
 fn swift_package_archive(package_id: &str) -> Vec<u8> {
@@ -867,4 +1199,421 @@ async fn nuget_native_multipart_upload_strips_envelope_body() {
         .await
         .unwrap();
     assert_eq!(downloaded.as_ref(), nupkg.as_slice());
+}
+
+#[test]
+fn test_composer_registry_lifecycle() {
+    common::run_with_large_stack(composer_registry_lifecycle_body);
+}
+
+async fn composer_registry_lifecycle_body() {
+    let app = setup_multiformat_test_app().await;
+    let package = format!("teaql/probe-{}", uuid::Uuid::new_v4().simple());
+    let (_, package_name) = package.split_once('/').unwrap();
+    let archive = composer_package_archive(&package);
+    let dist_path =
+        format!("/repository/composer-hosted/composer/dist/teaql/{package_name}/1.2.3.zip");
+    let publish = Request::builder()
+        .method(Method::PUT)
+        .uri(&dist_path)
+        .body(axum::body::Body::from(archive.clone()))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(publish).await.unwrap().status(),
+        StatusCode::CREATED
+    );
+
+    let duplicate = Request::builder()
+        .method(Method::PUT)
+        .uri(&dist_path)
+        .body(axum::body::Body::from(archive.clone()))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(duplicate).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+
+    let development_dist_path =
+        format!("/repository/composer-hosted/composer/dist/teaql/{package_name}/dev-main.zip");
+    let publish_development = Request::builder()
+        .method(Method::PUT)
+        .uri(&development_dist_path)
+        .body(axum::body::Body::from(archive.clone()))
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(publish_development)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CREATED
+    );
+
+    let root = Request::builder()
+        .uri("/repository/composer-hosted/composer/packages.json")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(root).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let root: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        root["metadata-url"],
+        "/repository/composer-hosted/composer/p2/%package%.json"
+    );
+    assert!(root["available-packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|name| name == &package));
+
+    let metadata = Request::builder()
+        .uri(format!(
+            "/repository/composer-hosted/composer/p2/{package}.json"
+        ))
+        .header(header::HOST, "registry.example.test:7443")
+        .header("x-forwarded-proto", "https")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(metadata).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata["packages"][&package][0]["version"], "1.2.3");
+    assert_eq!(metadata["packages"][&package].as_array().unwrap().len(), 1);
+    assert_eq!(metadata["packages"][&package][0]["dist"]["type"], "zip");
+    assert!(metadata["packages"][&package][0]["dist"]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://registry.example.test:7443/"));
+
+    let development_metadata = Request::builder()
+        .uri(format!(
+            "/repository/composer-hosted/composer/p2/{package}~dev.json"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(development_metadata).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let development_metadata: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        development_metadata["packages"][&package][0]["version"],
+        "dev-main"
+    );
+
+    let download = Request::builder()
+        .uri(&dist_path)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        archive
+    );
+}
+
+#[test]
+fn test_conan_v2_registry_lifecycle() {
+    common::run_with_large_stack(conan_v2_registry_lifecycle_body);
+}
+
+async fn conan_v2_registry_lifecycle_body() {
+    let app = setup_multiformat_test_app().await;
+    let package = format!("probe{}", uuid::Uuid::new_v4().simple());
+    let recipe_revision = "0123456789abcdef";
+    let base = format!(
+        "/repository/conan-hosted/conan/v2/conans/{package}/1.2.3/_/_/revisions/{recipe_revision}"
+    );
+
+    let ping = Request::builder()
+        .uri("/repository/conan-hosted/conan/v1/ping")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(ping).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["x-conan-server-capabilities"],
+        "revisions"
+    );
+
+    for (file, contents) in [
+        (
+            "conanfile.py",
+            format!("from conan import ConanFile\nclass Probe(ConanFile):\n    name = \"{package}\"\n    version = \"1.2.3\"\n"),
+        ),
+        ("conanmanifest.txt", "manifest".to_string()),
+    ] {
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri(format!("{base}/files/{file}"))
+            .body(axum::body::Body::from(contents))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::CREATED
+        );
+    }
+
+    let revisions = Request::builder()
+        .uri(format!(
+            "/repository/conan-hosted/conan/v2/conans/{package}/1.2.3/_/_/revisions"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(revisions).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let revisions: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(revisions["revisions"][0]["revision"], recipe_revision);
+
+    let snapshot = Request::builder()
+        .uri(format!("{base}/files"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(snapshot).await.unwrap();
+    let snapshot: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(snapshot["files"].get("conanfile.py").is_some());
+
+    let package_id = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
+    let package_revision = "fedcba9876543210";
+    let package_base = format!("{base}/packages/{package_id}/revisions/{package_revision}/files");
+    for (file, contents) in [
+        ("conaninfo.txt", "[settings]\nos=Linux\n"),
+        ("conanmanifest.txt", "manifest"),
+        ("conan_package.tgz", "binary-package"),
+    ] {
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri(format!("{package_base}/{file}"))
+            .body(axum::body::Body::from(contents))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::CREATED
+        );
+    }
+
+    let latest = Request::builder()
+        .uri(format!("{base}/packages/{package_id}/latest"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(latest).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let latest: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(latest["revision"], package_revision);
+
+    let package_search = Request::builder()
+        .uri(format!("{base}/search"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(package_search).await.unwrap();
+    let package_search: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(package_search[package_id]["content"]
+        .as_str()
+        .unwrap()
+        .contains("os=Linux"));
+
+    let download = Request::builder()
+        .uri(format!("{package_base}/conan_package.tgz"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"binary-package"
+    );
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct TestHexSigned {
+    #[prost(bytes = "vec", required, tag = "1")]
+    payload: Vec<u8>,
+    #[prost(bytes = "vec", optional, tag = "2")]
+    signature: Option<Vec<u8>>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct TestHexPackageRegistry {
+    #[prost(message, repeated, tag = "1")]
+    releases: Vec<TestHexRelease>,
+    #[prost(string, required, tag = "2")]
+    name: String,
+    #[prost(string, required, tag = "3")]
+    repository: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct TestHexRelease {
+    #[prost(string, required, tag = "1")]
+    version: String,
+    #[prost(bytes = "vec", required, tag = "2")]
+    inner_checksum: Vec<u8>,
+    #[prost(bytes = "vec", optional, tag = "5")]
+    outer_checksum: Option<Vec<u8>>,
+}
+
+#[test]
+fn test_hex_registry_v2_lifecycle_and_signature() {
+    common::run_with_large_stack(hex_registry_v2_lifecycle_and_signature_body);
+}
+
+async fn hex_registry_v2_lifecycle_and_signature_body() {
+    use flate2::read::GzDecoder;
+    use prost::Message;
+    use rsa::{
+        pkcs1v15::{Signature, VerifyingKey},
+        pkcs8::DecodePublicKey,
+        signature::Verifier,
+        RsaPublicKey,
+    };
+    use sha2::Sha512;
+    use std::io::Read;
+
+    let app = setup_multiformat_test_app().await;
+    let package = format!("probe_{}", uuid::Uuid::new_v4().simple());
+    let archive = hex_package_archive(&package, "1.2.3");
+    let publish = Request::builder()
+        .method(Method::POST)
+        .uri("/repository/hex-hosted/hex/api/publish")
+        .body(axum::body::Body::from(archive.clone()))
+        .unwrap();
+    let response = app.clone().oneshot(publish).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let public_key = Request::builder()
+        .uri("/repository/hex-hosted/hex/repo/public_key")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(public_key).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let public_key = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let registry = Request::builder()
+        .uri(format!(
+            "/repository/hex-hosted/hex/repo/packages/{package}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(registry).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // Hex registry files are gzip containers, not HTTP transfer-encoded bodies.
+    // Declaring Content-Encoding would make HTTP clients decompress them before
+    // the Hex client gets a chance to decode the registry container itself.
+    assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+    let etag = response.headers()[header::ETAG]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let compressed = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let mut decoder = GzDecoder::new(compressed.as_ref());
+    let mut signed_bytes = Vec::new();
+    decoder.read_to_end(&mut signed_bytes).unwrap();
+    let signed = TestHexSigned::decode(signed_bytes.as_slice()).unwrap();
+    let signature = Signature::try_from(signed.signature.as_deref().unwrap()).unwrap();
+    let public_key = RsaPublicKey::from_public_key_pem(&public_key).unwrap();
+    let verifying_key = VerifyingKey::<Sha512>::new(public_key);
+    verifying_key.verify(&signed.payload, &signature).unwrap();
+    let registry = TestHexPackageRegistry::decode(signed.payload.as_slice()).unwrap();
+    assert_eq!(registry.name, package);
+    assert_eq!(registry.repository, "hex-hosted");
+    assert_eq!(registry.releases[0].version, "1.2.3");
+    assert_eq!(
+        registry.releases[0].outer_checksum.as_deref(),
+        Some(sha2::Sha256::digest(&archive).as_slice())
+    );
+
+    for path in ["names", "versions"] {
+        let request = Request::builder()
+            .uri(format!("/repository/hex-hosted/hex/repo/{path}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::CONTENT_ENCODING).is_none());
+        let compressed = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let mut decoder = GzDecoder::new(compressed.as_ref());
+        let mut signed_bytes = Vec::new();
+        decoder.read_to_end(&mut signed_bytes).unwrap();
+        let signed = TestHexSigned::decode(signed_bytes.as_slice()).unwrap();
+        let signature = Signature::try_from(signed.signature.as_deref().unwrap()).unwrap();
+        verifying_key.verify(&signed.payload, &signature).unwrap();
+    }
+
+    let conditional = Request::builder()
+        .uri(format!(
+            "/repository/hex-hosted/hex/repo/packages/{package}"
+        ))
+        .header(header::IF_NONE_MATCH, etag)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(conditional).await.unwrap().status(),
+        StatusCode::NOT_MODIFIED
+    );
+
+    let download = Request::builder()
+        .uri(format!(
+            "/repository/hex-hosted/hex/repo/tarballs/{package}-1.2.3.tar"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        archive
+    );
 }

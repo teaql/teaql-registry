@@ -22,7 +22,7 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
   const [remoteUrl, setRemoteUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const formats = ['ALL', 'maven2', 'docker', 'npm', 'pypi', 'gomod', 'cargo', 'nuget', 'swift', 'raw'];
+  const formats = ['ALL', 'maven2', 'docker', 'npm', 'pypi', 'gomod', 'cargo', 'nuget', 'swift', 'dart', 'rubygems', 'composer', 'conan', 'hex', 'raw'];
 
   const filteredRepos = repositories.filter((repo) => {
     if (activeFilter === 'ALL') return true;
@@ -63,7 +63,7 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
       <div className="page-intro">
         <div>
           <h1 className="page-title">Repositories</h1>
-          <p className="page-desc">Manage package repositories across 8 ecosystems with multi-tier storage.</p>
+          <p className="page-desc">Manage package repositories across 14 ecosystems with multi-tier storage.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           <Plus size={16} /> Create Repository
@@ -151,6 +151,11 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
                   <option value="gomod">Go Modules</option>
                   <option value="nuget">NuGet (.NET)</option>
                   <option value="swift">Swift Package</option>
+                  <option value="dart">Dart Pub</option>
+                  <option value="rubygems">RubyGems</option>
+                  <option value="composer">Composer (PHP)</option>
+                  <option value="conan">Conan 2 (C/C++)</option>
+                  <option value="hex">Hex (Elixir/Erlang)</option>
                   <option value="raw">Raw (Generic)</option>
                 </select>
               </div>

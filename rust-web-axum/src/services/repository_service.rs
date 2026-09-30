@@ -166,6 +166,21 @@ impl RepositoryService {
             "SWIFT" | "SPM" => {
                 entity.update_repository_format_to_swift();
             }
+            "DART" | "PUB" => {
+                entity.update_repository_format_to_dart();
+            }
+            "RUBYGEMS" | "RUBY" | "GEM" => {
+                entity.update_repository_format_to_rubygems();
+            }
+            "COMPOSER" | "PHP" => {
+                entity.update_repository_format_to_composer();
+            }
+            "CONAN" | "CPP" | "CXX" => {
+                entity.update_repository_format_to_conan();
+            }
+            "HEX" | "ELIXIR" | "ERLANG" => {
+                entity.update_repository_format_to_hex();
+            }
             _ => {
                 entity.update_repository_format_to_raw();
             }

@@ -44,6 +44,8 @@ const HELP_TEXT: &str = r#"TeaQL Registry — Quick Start Guide
    S3_SECRET_KEY           — S3 secret key
    S3_BUCKET               — S3 bucket name
    S3_REGION               — S3 region
+   HEX_PRIVATE_KEY_PATH    — persistent RSA signing key for Hex registry indexes
+   HEX_PRIVATE_KEY_PEM     — persistent Hex RSA signing key supplied inline
 
 3. REST API OVERVIEW
    Base URL: http://<host>:<port>
@@ -89,6 +91,16 @@ const HELP_TEXT: &str = r#"TeaQL Registry — Quick Start Guide
    NuGet:  PUT /repository/<name>/v3/package   (dotnet nuget push)
    Swift:  PUT /repository/<name>/swift/<scope>/<package>/<version>
            (swift package-registry publish)
+   Dart:   GET /repository/<name>/dart/api/packages/<package>
+           (Hosted Pub Repository v2)
+   Ruby:   POST /repository/<name>/rubygems/api/v1/gems
+           (gem push; Bundler Compact Index under /rubygems)
+   PHP:    PUT /repository/<name>/composer/dist/<vendor>/<package>/<file>.zip
+           (Composer v2 metadata under /composer/p2)
+   C/C++:  GET/PUT /repository/<name>/conan/v2/conans/<recipe>/...
+           (Conan 2 revisions and package binaries)
+   Hex:    POST /repository/<name>/hex/api/publish
+           (signed Hex registry v2 indexes under /hex/repo)
    Raw:    PUT /repository/<name>/<path>       (arbitrary files)
 
 5. WEB CONSOLE

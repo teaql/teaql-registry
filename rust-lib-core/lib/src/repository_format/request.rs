@@ -1602,6 +1602,22 @@ impl<R> RepositoryFormatRequest<R> {
         self.with_id_is_not("1009")
     }
 
+    pub fn with_id_is_value_1010(self) -> Self {
+        self.with_id_is("1010")
+    }
+
+    pub fn with_id_is_not_value_1010(self) -> Self {
+        self.with_id_is_not("1010")
+    }
+
+    pub fn with_id_is_value_1011(self) -> Self {
+        self.with_id_is("1011")
+    }
+
+    pub fn with_id_is_not_value_1011(self) -> Self {
+        self.with_id_is_not("1011")
+    }
+
     pub fn with_name_is_maven2(self) -> Self {
         self.with_name_is("Maven2")
     }
@@ -1674,6 +1690,46 @@ impl<R> RepositoryFormatRequest<R> {
         self.with_name_is_not("Swift Package")
     }
 
+    pub fn with_name_is_dart_pub(self) -> Self {
+        self.with_name_is("Dart Pub")
+    }
+
+    pub fn with_name_is_not_dart_pub(self) -> Self {
+        self.with_name_is_not("Dart Pub")
+    }
+
+    pub fn with_name_is_ruby_gems(self) -> Self {
+        self.with_name_is("RubyGems")
+    }
+
+    pub fn with_name_is_not_ruby_gems(self) -> Self {
+        self.with_name_is_not("RubyGems")
+    }
+
+    pub fn with_name_is_composer(self) -> Self {
+        self.with_name_is("Composer")
+    }
+
+    pub fn with_name_is_not_composer(self) -> Self {
+        self.with_name_is_not("Composer")
+    }
+
+    pub fn with_name_is_conan(self) -> Self {
+        self.with_name_is("Conan")
+    }
+
+    pub fn with_name_is_not_conan(self) -> Self {
+        self.with_name_is_not("Conan")
+    }
+
+    pub fn with_name_is_hex(self) -> Self {
+        self.with_name_is("Hex")
+    }
+
+    pub fn with_name_is_not_hex(self) -> Self {
+        self.with_name_is_not("Hex")
+    }
+
     pub fn with_code_is_maven2(self) -> Self {
         self.with_code_is("MAVEN2")
     }
@@ -1744,6 +1800,46 @@ impl<R> RepositoryFormatRequest<R> {
 
     pub fn with_code_is_not_swif_t(self) -> Self {
         self.with_code_is_not("SWIFT")
+    }
+
+    pub fn with_code_is_dar_t(self) -> Self {
+        self.with_code_is("DART")
+    }
+
+    pub fn with_code_is_not_dar_t(self) -> Self {
+        self.with_code_is_not("DART")
+    }
+
+    pub fn with_code_is_rubygem_s(self) -> Self {
+        self.with_code_is("RUBYGEMS")
+    }
+
+    pub fn with_code_is_not_rubygem_s(self) -> Self {
+        self.with_code_is_not("RUBYGEMS")
+    }
+
+    pub fn with_code_is_compose_r(self) -> Self {
+        self.with_code_is("COMPOSER")
+    }
+
+    pub fn with_code_is_not_compose_r(self) -> Self {
+        self.with_code_is_not("COMPOSER")
+    }
+
+    pub fn with_code_is_cona_n(self) -> Self {
+        self.with_code_is("CONAN")
+    }
+
+    pub fn with_code_is_not_cona_n(self) -> Self {
+        self.with_code_is_not("CONAN")
+    }
+
+    pub fn with_code_is_he_x(self) -> Self {
+        self.with_code_is("HEX")
+    }
+
+    pub fn with_code_is_not_he_x(self) -> Self {
+        self.with_code_is_not("HEX")
     }
 
     pub fn filter_by_platform(mut self, value: impl EntityReference) -> Self {

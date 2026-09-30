@@ -60,6 +60,17 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo }) =>
       snippet = `dotnet add package ${comp.name} --version ${comp.version} --source ${window.location.origin}/repository/${comp.repository}/v3/index.json`;
     } else if (fmt === 'swift') {
       snippet = `.package(id: "${comp.group}.${comp.name}", exact: "${comp.version}")`;
+    } else if (fmt === 'dart') {
+      snippet = `dart pub add ${comp.name} --hosted ${window.location.origin}/repository/${comp.repository}/dart`;
+    } else if (fmt === 'rubygems') {
+      snippet = `gem install ${comp.name} -v ${comp.version} --source ${window.location.origin}/repository/${comp.repository}/rubygems`;
+    } else if (fmt === 'composer') {
+      const packageName = comp.group ? `${comp.group}/${comp.name}` : comp.name;
+      snippet = `composer require ${packageName}:${comp.version}`;
+    } else if (fmt === 'conan') {
+      snippet = `conan install --requires=${comp.name}/${comp.version.split('#')[0]} -r=${comp.repository} --build=missing`;
+    } else if (fmt === 'hex') {
+      snippet = `mix hex.package fetch ${comp.name} ${comp.version} --repo=${comp.repository}`;
     } else {
       snippet = `curl -O ${window.location.origin}/repository/${comp.repository}/${comp.name}`;
     }

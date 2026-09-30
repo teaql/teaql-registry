@@ -1044,6 +1044,261 @@ fn ensure_generated_bootstrap<'a>(
             )
             .await?;
         }
+        let rows_constant_repository_format_1010 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1010_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1010) =
+            rows_constant_repository_format_1010.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1010.platform_id() != 1_u64 {
+                constant_repository_format_1010.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1010.name() != "Dart Pub" {
+                constant_repository_format_1010.update_name("Dart Pub");
+                changed = true;
+            }
+            if constant_repository_format_1010.code() != "DART" {
+                constant_repository_format_1010.update_code("DART");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1010
+                        .audit_as("reconcile model constant RepositoryFormat(1010)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1010 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1010.update_id(1010_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1010,
+                RepositoryFormat::ENTITY_NAME,
+                1010_u64,
+            )?;
+            constant_repository_format_1010.update_platform_id(1_u64);
+            constant_repository_format_1010.update_name("Dart Pub");
+            constant_repository_format_1010.update_code("DART");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1010
+                    .audit_as("create model constant RepositoryFormat(1010)"),
+                context,
+            )
+            .await?;
+        }
+        let rows_constant_repository_format_1011 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1011_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1011) =
+            rows_constant_repository_format_1011.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1011.platform_id() != 1_u64 {
+                constant_repository_format_1011.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1011.name() != "RubyGems" {
+                constant_repository_format_1011.update_name("RubyGems");
+                changed = true;
+            }
+            if constant_repository_format_1011.code() != "RUBYGEMS" {
+                constant_repository_format_1011.update_code("RUBYGEMS");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1011
+                        .audit_as("reconcile model constant RepositoryFormat(1011)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1011 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1011.update_id(1011_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1011,
+                RepositoryFormat::ENTITY_NAME,
+                1011_u64,
+            )?;
+            constant_repository_format_1011.update_platform_id(1_u64);
+            constant_repository_format_1011.update_name("RubyGems");
+            constant_repository_format_1011.update_code("RUBYGEMS");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1011
+                    .audit_as("create model constant RepositoryFormat(1011)"),
+                context,
+            )
+            .await?;
+        }
+        let rows_constant_repository_format_1012 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1012_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1012) =
+            rows_constant_repository_format_1012.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1012.platform_id() != 1_u64 {
+                constant_repository_format_1012.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1012.name() != "Composer" {
+                constant_repository_format_1012.update_name("Composer");
+                changed = true;
+            }
+            if constant_repository_format_1012.code() != "COMPOSER" {
+                constant_repository_format_1012.update_code("COMPOSER");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1012
+                        .audit_as("reconcile model constant RepositoryFormat(1012)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1012 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1012.update_id(1012_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1012,
+                RepositoryFormat::ENTITY_NAME,
+                1012_u64,
+            )?;
+            constant_repository_format_1012.update_platform_id(1_u64);
+            constant_repository_format_1012.update_name("Composer");
+            constant_repository_format_1012.update_code("COMPOSER");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1012
+                    .audit_as("create model constant RepositoryFormat(1012)"),
+                context,
+            )
+            .await?;
+        }
+        let rows_constant_repository_format_1013 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1013_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1013) =
+            rows_constant_repository_format_1013.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1013.platform_id() != 1_u64 {
+                constant_repository_format_1013.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1013.name() != "Conan" {
+                constant_repository_format_1013.update_name("Conan");
+                changed = true;
+            }
+            if constant_repository_format_1013.code() != "CONAN" {
+                constant_repository_format_1013.update_code("CONAN");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1013
+                        .audit_as("reconcile model constant RepositoryFormat(1013)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1013 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1013.update_id(1013_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1013,
+                RepositoryFormat::ENTITY_NAME,
+                1013_u64,
+            )?;
+            constant_repository_format_1013.update_platform_id(1_u64);
+            constant_repository_format_1013.update_name("Conan");
+            constant_repository_format_1013.update_code("CONAN");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1013
+                    .audit_as("create model constant RepositoryFormat(1013)"),
+                context,
+            )
+            .await?;
+        }
+        let rows_constant_repository_format_1014 = crate::Q::repository_formats()
+            .select_self_fields()
+            .with_id_is(1014_u64)
+            .comment("what: locate generated constant")
+            .purpose("why: idempotent runtime bootstrap")
+            .execute_for_list(context)
+            .await
+            .map_err(|e| teaql_runtime::RuntimeError::Graph(e.to_string()))?;
+        if let Some(mut constant_repository_format_1014) =
+            rows_constant_repository_format_1014.data.into_iter().next()
+        {
+            let mut changed = false;
+            if constant_repository_format_1014.platform_id() != 1_u64 {
+                constant_repository_format_1014.update_platform_id(1_u64);
+                changed = true;
+            }
+            if constant_repository_format_1014.name() != "Hex" {
+                constant_repository_format_1014.update_name("Hex");
+                changed = true;
+            }
+            if constant_repository_format_1014.code() != "HEX" {
+                constant_repository_format_1014.update_code("HEX");
+                changed = true;
+            }
+            if changed {
+                let _ = teaql_runtime::AuditedSaveExt::save(
+                    constant_repository_format_1014
+                        .audit_as("reconcile model constant RepositoryFormat(1014)"),
+                    context,
+                )
+                .await?;
+            }
+        } else {
+            let mut constant_repository_format_1014 =
+                RepositoryFormat::runtime_new(context.entity_runtime_state());
+            constant_repository_format_1014.update_id(1014_u64);
+            context.initialize_generated_bootstrap_entity(
+                &mut constant_repository_format_1014,
+                RepositoryFormat::ENTITY_NAME,
+                1014_u64,
+            )?;
+            constant_repository_format_1014.update_platform_id(1_u64);
+            constant_repository_format_1014.update_name("Hex");
+            constant_repository_format_1014.update_code("HEX");
+            let _ = teaql_runtime::AuditedSaveExt::save(
+                constant_repository_format_1014
+                    .audit_as("create model constant RepositoryFormat(1014)"),
+                context,
+            )
+            .await?;
+        }
         let rows_constant_write_policy_1001 = crate::Q::write_policies()
             .select_self_fields()
             .with_id_is(1001_u64)

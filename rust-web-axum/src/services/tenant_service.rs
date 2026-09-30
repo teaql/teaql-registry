@@ -220,6 +220,46 @@ impl TenantService {
                 "ALLOW_ONCE",
                 "",
             ),
+            (
+                "dart-hosted",
+                "dart-hosted",
+                "HOSTED",
+                "DART",
+                "ALLOW_ONCE",
+                "",
+            ),
+            (
+                "rubygems-hosted",
+                "rubygems-hosted",
+                "HOSTED",
+                "RUBYGEMS",
+                "ALLOW_ONCE",
+                "",
+            ),
+            (
+                "composer-hosted",
+                "composer-hosted",
+                "HOSTED",
+                "COMPOSER",
+                "ALLOW_ONCE",
+                "",
+            ),
+            (
+                "conan-hosted",
+                "conan-hosted",
+                "HOSTED",
+                "CONAN",
+                "ALLOW_WRITE",
+                "",
+            ),
+            (
+                "hex-hosted",
+                "hex-hosted",
+                "HOSTED",
+                "HEX",
+                "ALLOW_ONCE",
+                "",
+            ),
         ];
 
         for (name, recipe, rtype, fmt, wpolicy, rurl) in format_repos {

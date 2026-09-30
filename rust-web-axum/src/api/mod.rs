@@ -1,7 +1,11 @@
 pub mod cargo_registry;
+pub mod composer_registry;
+pub mod conan_registry;
+pub mod dart_registry;
 pub mod docker_registry;
 pub mod gomod_registry;
 pub mod help;
+pub mod hex_registry;
 pub mod metrics;
 pub mod npm_registry;
 pub mod nuget_registry;
@@ -17,6 +21,7 @@ pub mod rest_status;
 pub mod rest_tenants;
 pub mod rest_tokens;
 pub mod rest_webhooks;
+pub mod rubygems_registry;
 pub mod search;
 pub mod swift_registry;
 
@@ -260,6 +265,149 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/repository/:name/swift",
             axum::routing::options(swift_registry::handle_swift_options),
+        )
+        // Dart Hosted Pub Repository v2
+        .route(
+            "/repository/:name/dart/api/packages/versions/new",
+            get(dart_registry::handle_dart_new_upload),
+        )
+        .route(
+            "/repository/:name/dart/api/packages/versions/newUpload",
+            post(dart_registry::handle_dart_upload).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/dart/api/packages/versions/newUpload/complete/:package/:version",
+            get(dart_registry::handle_dart_finalize),
+        )
+        .route(
+            "/repository/:name/dart/api/packages/:package",
+            get(dart_registry::handle_dart_versions),
+        )
+        .route(
+            "/repository/:name/dart/api/packages/:package/versions/:version",
+            get(dart_registry::handle_dart_version),
+        )
+        .route(
+            "/repository/:name/dart/packages/:package/versions/:archive",
+            get(dart_registry::handle_dart_archive),
+        )
+        // RubyGems push, download, and Bundler Compact Index
+        .route(
+            "/repository/:name/rubygems/api/v1/gems",
+            post(rubygems_registry::handle_rubygems_push).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/rubygems/gems/:filename",
+            get(rubygems_registry::handle_rubygems_download),
+        )
+        .route(
+            "/repository/:name/rubygems/versions",
+            get(rubygems_registry::handle_rubygems_versions),
+        )
+        .route(
+            "/repository/:name/rubygems/info/:gem_name",
+            get(rubygems_registry::handle_rubygems_info),
+        )
+        .route(
+            "/repository/:name/rubygems/names",
+            get(rubygems_registry::handle_rubygems_names),
+        )
+        // Composer 2 metadata and dist archives
+        .route(
+            "/repository/:name/composer/packages.json",
+            get(composer_registry::handle_composer_root),
+        )
+        .route(
+            "/repository/:name/composer/p2/*package_path",
+            get(composer_registry::handle_composer_p2),
+        )
+        .route(
+            "/repository/:name/composer/dist/:vendor/:package/:filename",
+            get(composer_registry::handle_composer_dist)
+                .put(composer_registry::handle_composer_publish)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        // Conan 2 revisions REST API
+        .route(
+            "/repository/:name/conan/v1/ping",
+            get(conan_registry::handle_conan_ping),
+        )
+        .route(
+            "/repository/:name/conan/v2/users/authenticate",
+            get(conan_registry::handle_conan_authenticate),
+        )
+        .route(
+            "/repository/:name/conan/v2/users/check_credentials",
+            get(conan_registry::handle_conan_check_credentials),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/search",
+            get(conan_registry::handle_conan_search),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions",
+            get(conan_registry::handle_conan_recipe_revisions),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/latest",
+            get(conan_registry::handle_conan_recipe_latest),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/files",
+            get(conan_registry::handle_conan_recipe_snapshot),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/files/*file_path",
+            get(conan_registry::handle_conan_recipe_file_get)
+                .put(conan_registry::handle_conan_recipe_file_put)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/search",
+            get(conan_registry::handle_conan_package_search),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/packages/:package_id/revisions",
+            get(conan_registry::handle_conan_package_revisions),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/packages/:package_id/latest",
+            get(conan_registry::handle_conan_package_latest),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/packages/:package_id/revisions/:package_revision/files",
+            get(conan_registry::handle_conan_package_snapshot),
+        )
+        .route(
+            "/repository/:name/conan/v2/conans/:package/:version/:user/:channel/revisions/:recipe_revision/packages/:package_id/revisions/:package_revision/files/*file_path",
+            get(conan_registry::handle_conan_package_file_get)
+                .put(conan_registry::handle_conan_package_file_put)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        // Hex publish API and signed Registry v2
+        .route(
+            "/repository/:name/hex/api/publish",
+            post(hex_registry::handle_hex_publish).layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/repository/:name/hex/repo/public_key",
+            get(hex_registry::handle_hex_public_key),
+        )
+        .route(
+            "/repository/:name/hex/repo/names",
+            get(hex_registry::handle_hex_names),
+        )
+        .route(
+            "/repository/:name/hex/repo/versions",
+            get(hex_registry::handle_hex_versions),
+        )
+        .route(
+            "/repository/:name/hex/repo/packages/:package",
+            get(hex_registry::handle_hex_package),
+        )
+        .route(
+            "/repository/:name/hex/repo/tarballs/:filename",
+            get(hex_registry::handle_hex_tarball),
         )
         // Generic Maven & Raw repository content: /repository/:name/*path
         .route(

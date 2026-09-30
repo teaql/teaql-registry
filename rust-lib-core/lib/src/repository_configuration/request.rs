@@ -2778,6 +2778,61 @@ impl<R> RepositoryConfigurationRequest<R> {
         self
     }
 
+    pub fn with_repository_format_is_dart(self) -> Self {
+        self.filter_by_repository_format(1010_u64)
+    }
+
+    pub fn with_repository_format_is_not_dart(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1010_u64));
+        self
+    }
+
+    pub fn with_repository_format_is_rubygems(self) -> Self {
+        self.filter_by_repository_format(1011_u64)
+    }
+
+    pub fn with_repository_format_is_not_rubygems(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1011_u64));
+        self
+    }
+
+    pub fn with_repository_format_is_composer(self) -> Self {
+        self.filter_by_repository_format(1012_u64)
+    }
+
+    pub fn with_repository_format_is_not_composer(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1012_u64));
+        self
+    }
+
+    pub fn with_repository_format_is_conan(self) -> Self {
+        self.filter_by_repository_format(1013_u64)
+    }
+
+    pub fn with_repository_format_is_not_conan(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1013_u64));
+        self
+    }
+
+    pub fn with_repository_format_is_hex(self) -> Self {
+        self.filter_by_repository_format(1014_u64)
+    }
+
+    pub fn with_repository_format_is_not_hex(mut self) -> Self {
+        self.query = self
+            .query
+            .and_filter(Expr::ne("repository_format_id", 1014_u64));
+        self
+    }
+
     pub fn with_write_policy_is_allow_write(self) -> Self {
         self.filter_by_write_policy(1001_u64)
     }

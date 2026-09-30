@@ -376,6 +376,20 @@ fn render_block_to_lines(
                     endpoint, repo.url, repo.name
                 ),
                 "swift" => format!("swift package-registry set {}{}/swift", endpoint, repo.url),
+                "dart" => format!("PUB_HOSTED_URL={}{}/dart dart pub get", endpoint, repo.url),
+                "rubygems" => format!("gem sources --add {}{}/rubygems", endpoint, repo.url),
+                "composer" => format!(
+                    "composer config repositories.{} composer {}{}/composer",
+                    repo.name, endpoint, repo.url
+                ),
+                "conan" => format!(
+                    "conan remote add {} {}{}/conan",
+                    repo.name, endpoint, repo.url
+                ),
+                "hex" => format!(
+                    "mix hex.repo add {} {}{}/hex/repo --public-key public_key.pem",
+                    repo.name, endpoint, repo.url
+                ),
                 _ => format!("curl -O {}{}/PATH", endpoint, repo.url),
             };
             lines.push(Line::from(Span::styled(
@@ -656,6 +670,29 @@ fn component_usage_snippet(component: &crate::types::ComponentItem) -> String {
         "swift" => format!(
             ".package(id: \"{}.{}\", exact: \"{}\")",
             component.group, component.name, component.version
+        ),
+        "dart" => format!("dart pub add {} --hosted REGISTRY_URL", component.name),
+        "rubygems" => format!(
+            "gem install {} -v {} --source REGISTRY_URL",
+            component.name, component.version
+        ),
+        "composer" => {
+            let package = if component.group.is_empty() {
+                component.name.clone()
+            } else {
+                format!("{}/{}", component.group, component.name)
+            };
+            format!("composer require {}:{}", package, component.version)
+        }
+        "conan" => format!(
+            "conan install --requires={}/{} -r={} --build=missing",
+            component.name,
+            component.version.split('#').next().unwrap_or(&component.version),
+            component.repository
+        ),
+        "hex" => format!(
+            "mix hex.package fetch {} {} --repo={}",
+            component.name, component.version, component.repository
         ),
         "docker" => format!(
             "docker pull {}:{}",

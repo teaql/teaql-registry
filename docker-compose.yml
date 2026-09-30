@@ -20,6 +20,8 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - PORT=${PORT:-8081}
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8081}
+      - HEX_PRIVATE_KEY_PATH=${HEX_PRIVATE_KEY_PATH:-}
+      - HEX_PRIVATE_KEY_PEM=${HEX_PRIVATE_KEY_PEM:-}
       - RUST_LOG=${RUST_LOG:-info}
       - ALLOW_ANONYMOUS_READ=${ALLOW_ANONYMOUS_READ:-false}
     volumes:

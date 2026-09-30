@@ -166,6 +166,16 @@ async fn test_user_context_tenant_isolation_body() {
     assert!(repos_b.iter().any(|r| r.name() == "maven-releases"));
     assert!(repos_a.iter().any(|r| r.name() == "swift-hosted"));
     assert!(repos_b.iter().any(|r| r.name() == "swift-hosted"));
+    assert!(repos_a.iter().any(|r| r.name() == "dart-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "dart-hosted"));
+    assert!(repos_a.iter().any(|r| r.name() == "rubygems-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "rubygems-hosted"));
+    assert!(repos_a.iter().any(|r| r.name() == "composer-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "composer-hosted"));
+    assert!(repos_a.iter().any(|r| r.name() == "conan-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "conan-hosted"));
+    assert!(repos_a.iter().any(|r| r.name() == "hex-hosted"));
+    assert!(repos_b.iter().any(|r| r.name() == "hex-hosted"));
     assert_ne!(repos_a[0].id(), repos_b[0].id());
 
     // 5. Verify BlobStore isolation transparently via UserContext

@@ -581,6 +581,41 @@ impl RepositoryConfiguration {
     pub fn repository_format_is_swift(&self) -> bool {
         self.repository_format_id() == 1009_u64
     }
+    pub fn update_repository_format_to_dart(&mut self) -> &mut Self {
+        self.update_repository_format_id(1010_u64)
+    }
+
+    pub fn repository_format_is_dart(&self) -> bool {
+        self.repository_format_id() == 1010_u64
+    }
+    pub fn update_repository_format_to_rubygems(&mut self) -> &mut Self {
+        self.update_repository_format_id(1011_u64)
+    }
+
+    pub fn repository_format_is_rubygems(&self) -> bool {
+        self.repository_format_id() == 1011_u64
+    }
+    pub fn update_repository_format_to_composer(&mut self) -> &mut Self {
+        self.update_repository_format_id(1012_u64)
+    }
+
+    pub fn repository_format_is_composer(&self) -> bool {
+        self.repository_format_id() == 1012_u64
+    }
+    pub fn update_repository_format_to_conan(&mut self) -> &mut Self {
+        self.update_repository_format_id(1013_u64)
+    }
+
+    pub fn repository_format_is_conan(&self) -> bool {
+        self.repository_format_id() == 1013_u64
+    }
+    pub fn update_repository_format_to_hex(&mut self) -> &mut Self {
+        self.update_repository_format_id(1014_u64)
+    }
+
+    pub fn repository_format_is_hex(&self) -> bool {
+        self.repository_format_id() == 1014_u64
+    }
 
     pub fn update_write_policy_to_allow_write(&mut self) -> &mut Self {
         self.update_write_policy_id(1001_u64)

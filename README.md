@@ -52,16 +52,21 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
 
 ## Key Features
 
-- **9 Package Ecosystems Supported Out of the Box**:
-  - **Docker Registry v2**: Monolithic & chunked layer push/pull, manifest management.
-  - **Maven2**: Release and snapshot JAR/POM uploads, SHA-1 / SHA-256 checksums.
-  - **NPM**: Standard `npm publish` / `npm install` and tarball distribution.
-  - **PyPI**: Python Wheel/Tarball hosting and Simple Index (`/simple/`).
-  - **Cargo (Rust)**: Sparse Index protocol support, crate publish and download.
-  - **Go Modules**: GOPROXY specification compliance (`.info`, `.mod`, `.zip`).
-  - **NuGet (.NET)**: NuGet v3 Flat Container protocol and `dotnet nuget push`.
-  - **Swift Package Registry**: Native SwiftPM publish, resolution, manifest, source archive, checksum, and URL-to-package lookup APIs.
-  - **Raw**: Arbitrary binary tools, archives, and files over HTTP.
+- **14 Artifact Formats Supported Out of the Box**:
+  - 🐳 **Docker Registry v2**: Monolithic & chunked layer push/pull, manifest management.
+  - ☕ **Maven2**: Release and snapshot JAR/POM uploads, SHA-1 / SHA-256 checksums.
+  - 📦 **NPM**: Standard `npm publish` / `npm install` and tarball distribution.
+  - 🐍 **PyPI**: Python Wheel/Tarball hosting and Simple Index (`/simple/`).
+  - 🦀 **Cargo (Rust)**: Sparse Index protocol support, crate publish and download.
+  - 🐹 **Go Modules**: GOPROXY specification compliance (`.info`, `.mod`, `.zip`).
+  - 🟪 **NuGet (.NET)**: NuGet v3 Flat Container protocol and `dotnet nuget push`.
+  - 🐦 **Swift Package Registry**: Native SwiftPM publish, resolution, manifest, source archive, checksum, and URL-to-package lookup APIs.
+  - 🎯 **Dart Pub**: Hosted Pub Repository v2 package publish, metadata resolution, archive download, and checksums.
+  - 💎 **RubyGems**: Native `gem push`, gem downloads, and Bundler Compact Index resolution.
+  - 🐘 **Composer (PHP)**: Composer v2 repository metadata, immutable ZIP publication, and dist archive downloads.
+  - 🧰 **Conan 2 (C/C++)**: Native recipe/package revision upload, resolution, search, and binary downloads.
+  - 💧 **Hex (Elixir/Erlang)**: Package publication, signed registry v2 indexes, and tarball distribution.
+  - 📁 **Raw / Generic**: Arbitrary binary tools, archives, and files over HTTP.
 - **Pure In-Memory High-Performance Mode (`--memory-mode` / `MEMORY_MODE=true`)**:
   - In-memory volatile RAM blob storage designed for specialized scenarios requiring maximum throughput and zero I/O latency.
   - **Strict Single Latest Version Retention**: Every artifact automatically evicts prior versions upon publishing a new version to bound memory consumption.
@@ -186,6 +191,137 @@ swift package-registry publish teaql.MyPackage 1.0.0 \
   --url http://localhost:8081/repository/swift-hosted/swift \
   --allow-insecure-http
 ```
+
+For Dart, use the repository root as the hosted URL. Publication uses the
+standard Pub v2 upload handshake; authenticated repositories should be served
+over HTTPS so `dart pub` can safely attach the token:
+
+```yaml
+# pubspec.yaml
+name: my_package
+version: 1.0.0
+publish_to: https://registry.example.com/repository/dart-hosted/dart
+```
+
+```bash
+dart pub token add \
+  https://registry.example.com/repository/dart-hosted/dart \
+  --env-var TEAQL_REGISTRY_TOKEN
+dart pub publish
+```
+
+Consumers can set `PUB_HOSTED_URL` for a full mirror or use a per-dependency
+`hosted` URL in `pubspec.yaml`.
+
+RubyGems uses the repository's `/rubygems` URL for both native publication and
+Bundler's Compact Index:
+
+```bash
+gem push my_package-1.0.0.gem \
+  --host https://registry.example.com/repository/rubygems-hosted/rubygems
+gem sources --add \
+  https://registry.example.com/repository/rubygems-hosted/rubygems
+gem install my_package --version 1.0.0
+```
+
+Use a TeaQL personal access token as the Pub bearer token or RubyGems API key.
+
+Composer packages are uploaded as ZIP archives containing `composer.json`. The
+path vendor and package must match the manifest name:
+
+```bash
+curl -u admin:<password> --upload-file my-package-1.2.3.zip \
+  https://registry.example.com/repository/composer-hosted/composer/dist/acme/my-package/1.2.3.zip
+composer config repositories.teaql composer \
+  https://registry.example.com/repository/composer-hosted/composer
+composer require acme/my-package:1.2.3
+```
+
+Conan 2 uses the repository's `/conan` endpoint and supports its native
+Basic-login-to-bearer-token flow:
+
+```bash
+conan remote add teaql \
+  https://registry.example.com/repository/conan-hosted/conan
+conan remote login teaql admin -p <password>
+conan upload 'hello/1.2.3' -r=teaql --confirm
+conan install --requires=hello/1.2.3 -r=teaql --build=missing
+```
+
+Hex clients need the repository signing public key. Point publication at the
+matching API root and use a TeaQL personal access token as `HEX_API_KEY`:
+
+```bash
+curl -o teaql-hex-public-key.pem \
+  https://registry.example.com/repository/hex-hosted/hex/repo/public_key
+mix hex.repo add hex-hosted \
+  https://registry.example.com/repository/hex-hosted/hex/repo \
+  --public-key teaql-hex-public-key.pem
+HEX_API_URL=https://registry.example.com/repository/hex-hosted/hex/api \
+HEX_API_KEY=tql_pat_xxx mix hex.publish --yes
+```
+
+```elixir
+# mix.exs
+{:my_package, "~> 1.2", repo: "hex-hosted"}
+```
+
+For production Hex repositories, configure a persistent RSA private key with
+`HEX_PRIVATE_KEY_PATH` or `HEX_PRIVATE_KEY_PEM`. Without either variable, the
+service creates a process-local development key whose public key changes after
+a restart.
+
+### 🧰 Distributing Prebuilt Toolchains and Platform Binaries
+
+For compilers, code generators, SDKs, native CLIs, and cross-compilation
+toolchains, choose the repository format according to how consumers resolve the
+artifact:
+
+```mermaid
+flowchart TD
+    A["🧰 Prebuilt toolchain or native binary"] --> B{"Ship a complete containerized environment?"}
+    B -->|Yes| C["🐳 Docker Registry v2"]
+    B -->|No| D{"Consumed by a C/C++ Conan build?"}
+    D -->|Yes| E["🧰 Conan 2 package / tool_requires"]
+    D -->|No| F{"Owned by one language ecosystem?"}
+    F -->|Yes| G["📦 Use that ecosystem's native format"]
+    F -->|No| H["📁 Raw / Generic — recommended default"]
+```
+
+| Icon | Format | Best fit for prebuilt artifacts | Typical consumer |
+| :---: | :--- | :--- | :--- |
+| 📁 | **Raw / Generic** | Cross-ecosystem CLIs, SDKs, compilers, code generators, and platform archives | `curl`, CI bootstrap scripts, custom installers |
+| 🧰 | **Conan 2** | C/C++ libraries, compiler packages, and build tools selected through profiles | `conan install`, `tool_requires` |
+| 🐳 | **Docker Registry v2** | Complete build images containing an OS, compiler, SDK, and system dependencies | Docker, containerd, Kubernetes runners |
+| 📦 | **Native ecosystem format** | A binary or CLI intentionally installed through npm, NuGet, PyPI, Cargo, Composer, Hex, and similar clients | The ecosystem's package manager |
+
+For a language-neutral toolchain, use a Raw repository and keep the platform
+coordinates in the path:
+
+```text
+toolchains/<name>/<version>/<os>-<arch>/<archive>
+
+toolchains/protoc/28.2/linux-x86_64/protoc-28.2.tar.gz
+toolchains/protoc/28.2/linux-aarch64/protoc-28.2.tar.gz
+toolchains/protoc/28.2/darwin-aarch64/protoc-28.2.tar.gz
+toolchains/protoc/28.2/windows-x86_64/protoc-28.2.zip
+toolchains/protoc/28.2/manifest.json
+```
+
+Publish an archive and its platform manifest with ordinary authenticated HTTP
+uploads:
+
+```bash
+curl -u admin:<password> --upload-file protoc-28.2.tar.gz \
+  https://registry.example.com/repository/raw-hosted/toolchains/protoc/28.2/linux-x86_64/protoc-28.2.tar.gz
+curl -u admin:<password> --upload-file manifest.json \
+  https://registry.example.com/repository/raw-hosted/toolchains/protoc/28.2/manifest.json
+```
+
+The registry records content checksums and deduplicates blobs. A companion
+`manifest.json` should describe the supported `os`, `arch`, entry point, archive
+path, and expected SHA-256 so bootstrap scripts can select and verify the right
+binary deterministically.
 
 The controlled native-client suite uses these commands and then resolves and
 builds a clean consumer through SwiftPM:
