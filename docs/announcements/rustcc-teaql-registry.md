@@ -42,17 +42,42 @@ Registry 的数据面有大量流式上传下载、校验、协议路由和并�
 
 Registry 很适合检验一个业务框架是否真的能处理复杂场景：它既有多租户和权限边界，又有大量列表查询，还要承受高频写入、版本竞争和跨实体关系读取。在 TeaQL Registry 中，TeaQL（下文简称 TQ）不是只负责把表映射成 Rust struct，而是把查询意图、租户上下文、变更审计和数据加载状态一起带进业务代码。
 
-### 1. 把租户隔离绑定到可信请求上下文
+### 1. 在 TQ 执行入口集中实施租户隔离
 
-每个请求会先解析 Token、`X-TeaQL-Tenant` 或带租户限定的用户名，确认用户确实属于目标租户，然后基于共享连接池创建一个请求级 TQ Runtime：
+多租户隔离最怕依赖开发者记忆：如果要求每个 Service 都手写一次 `filter_by_tenant(...)`，迟早会有新接口漏掉。TeaQL Registry 把隔离放在 TQ 的统一执行入口 `RequestPolicy` 中。每一条查询在交给数据服务之前，都会经过 `enforce_select`；策略从可信 context 取得当前租户，并把条件与原查询合并：
 
 ```rust
-let mut runtime = service_runtime_from_pool(pool.clone()).await?;
-runtime.init_registry_context(self.blobstore.clone());
-runtime.set_tenant(tenant_id, tenant_name);
+impl RequestPolicy for TeaQLRegistryTenantRequestPolicy {
+    fn enforce_select(
+        &self,
+        context: &UserContext,
+        query: &mut SelectQuery,
+    ) -> Result<(), RuntimeError> {
+        // 集中维护模型中带 tenant 关系的实体集合
+        if tenant_scoped_entities.contains(&query.entity.as_str()) {
+            let tenant_id = context
+                .get_resource::<TenantInfo>()
+                .map(|tenant| tenant.tenant_id)
+                .unwrap_or(1);
+            let tenant_filter = Expr::eq("tenant_id", tenant_id);
+            query.filter = Some(match query.filter.take() {
+                Some(existing) => existing.and_expr(tenant_filter),
+                None => tenant_filter,
+            });
+        }
+        Ok(())
+    }
+}
 ```
 
-后续仓库、组件、用户和日志的查询或写入都只接收这个请求级 context。租户、身份、权限、请求策略和数据服务由可信 context 注入，而不是让 HTTP JSON 参数临时决定。这样协议处理器不需要在每条查询里重复拼接一段容易漏掉的租户 SQL，也不会因为某个新接口忘记过滤条件而意外跨租户读取。
+HTTP 认证层只负责解析 Token、`X-TeaQL-Tenant` 或带租户限定的用户名，确认用户属于目标租户，然后创建请求级 TQ Runtime。`set_tenant(...)` 会同时写入 `TenantInfo` 并安装上述策略。后续业务查询只接收这个 context，不再传递 `tenant_id`，也不需要重复拼租户条件：
+
+```rust
+let repositories = RepositoryService::list(&tenant_context).await?;
+let users = SecurityService::list_users(&tenant_context).await?;
+```
+
+项目的多租户集成测试会创建两个 context，然后用完全相同、没有租户参数的调用分别查询仓库、BlobStore 和用户，验证结果只来自各自租户。隔离因此是“默认发生”的基础设施能力，而不是散落在业务代码里的编码约定。
 
 PAT 也绑定 `tenant_id + user_id + username`；即使原生包管理器把 Token 放在 Basic Auth 密码位置，服务端仍会重新校验这三者与当前租户是否一致。
 
@@ -63,7 +88,6 @@ PAT 也绑定 `tenant_id + user_id + username`；即使原生包管理器把 Tok
 ```rust
 let rows = Q::service_logs_minimal()
     .select_self_fields()
-    .filter_by_tenant(tenant_id)
     .order_by_id_desc()
     .offset(offset as u64, limit as u64)
     .comment("what: query registry service logs with bounded pagination")
@@ -72,7 +96,7 @@ let rows = Q::service_logs_minimal()
     .await?;
 ```
 
-`order_by_id_desc()` 给翻页提供确定顺序，`offset/limit` 限制单次物化规模；字段选择、关系选择和过滤方法则来自模型生成代码，字段改名或关系不存在会在编译阶段暴露。对于需要同时返回分页元数据的列表，TQ 还提供 `execute_for_page(context, offset, limit)`，返回 `SmartList<T>`，并由 Runtime 统一执行硬上限和查询策略。
+这段查询故意没有 `filter_by_tenant(...)`：租户条件会在 TQ 执行入口由 `RequestPolicy` 自动注入。`order_by_id_desc()` 给翻页提供确定顺序，`offset/limit` 限制单次物化规模；字段选择、关系选择和业务过滤方法则来自模型生成代码，字段改名或关系不存在会在编译阶段暴露。对于需要同时返回分页元数据的列表，TQ 还提供 `execute_for_page(context, offset, limit)`，返回 `SmartList<T>`，并由 Runtime 统一执行硬上限和查询策略。
 
 这里的 `comment` 与 `purpose` 也不是装饰：它们把“查询了什么”和“为什么查询”带到执行阶段，缺失查询意图可以被策略拒绝，便于审计和诊断慢查询。
 
@@ -100,7 +124,7 @@ if let Some(mut component) = rows.into_iter().next() {
 }
 ```
 
-完整加载很重要：TQ 的 checker 可以看到完整业务状态，实体原始版本也能参与乐观锁判断。`audit_as(...)` 让每次持久化都携带明确的业务原因；保存仍然只接受原请求 context，因此修改无法绕开同一套租户、权限与审计边界。
+完整加载很重要：目标实体首先经过集中租户策略查询，TQ 的 checker 可以看到完整业务状态，实体原始版本也能参与乐观锁判断。`audit_as(...)` 让每次持久化都携带明确的业务原因；保存继续使用同一个请求 context，使查询、修改和审计处在同一条请求链路中。
 
 ### 4. 用 E 表达式区分“空值”和“根本没加载”
 
