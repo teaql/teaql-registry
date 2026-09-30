@@ -40,7 +40,7 @@ Registry 的数据面有大量流式上传下载、校验、协议路由和并�
 
 ## TeaQL 在这个项目里做了什么？
 
-Registry 很适合检验一个业务框架是否真的能处理复杂场景：它既有多租户和权限边界，又有大量列表查询，还要承受高频写入、版本竞争和跨实体关系读取。在 TeaQL Registry 中，TeaQL（下文简称 TQ）不是只负责把表映射成 Rust struct，而是把查询意图、租户上下文、变更审计和数据加载状态一起带进业务代码。
+Registry 很适合检验一个业务框架是否真的能处理复杂场景：它既有多租户和权限边界，又有大量列表查询，还要承受高频写入、版本竞争和跨实体关系读取。在 TeaQL Registry 中，TeaQL（下文简称 TQ）不是只负责把表映射成 Rust struct，而是把查询意图、租户上下文、变更审计、Mutation Policy 治理和数据加载状态一起带进业务代码。本文中的 Mutation Policy Approval 基于 TeaQL Rust Runtime 5.0.5。
 
 ### 1. 在 TQ 执行入口集中实施租户隔离
 
@@ -126,7 +126,80 @@ if let Some(mut component) = rows.into_iter().next() {
 
 完整加载很重要：目标实体首先经过集中租户策略查询，TQ 的 checker 可以看到完整业务状态，实体原始版本也能参与乐观锁判断。`audit_as(...)` 让每次持久化都携带明确的业务原因；保存继续使用同一个请求 context，使查询、修改和审计处在同一条请求链路中。
 
-### 4. 用 E 表达式区分“空值”和“根本没加载”
+### 4. 在事务之前完成 Mutation Policy Approval
+
+`audit_as(...)` 解决的是“这次修改为什么发生”，Mutation Policy Approval 解决的是另一个问题：“允许这类修改的规则本身，是否经过了明确评审？”这不是订单、工单一类业务单据的人工审批流，而是对应用自定义写策略的版本化批准。
+
+TeaQL 5.0.5 会在 Checker/Fix 和完整 Graph Planning 之后生成不可变的 `MutationPlan`。其中包含根实体、审计原因、Create/Update/Delete/Recover 操作、原始版本以及实际变更字段。Runtime 在开启数据库事务、执行第一条写入之前，把整份计划交给 `MutationPolicy::review`：
+
+```text
+实体变更
+   │
+   ▼
+Checker / Fix ──► 不可变 MutationPlan
+                         │
+                         ▼
+                MutationPolicy::review
+                    │              │
+                  Deny           Allow
+                    │              │
+          事务开始前返回错误     精确查找 Policy Approval
+                                   │
+                                   ▼
+                           事务写入 + 审计事件
+```
+
+应用策略可以对整张变更图做判断，而不必把规则散落在每个 Service 方法中。例如，Registry 可以要求每次写入都带审计原因，并限制一次保存携带的操作数量：
+
+```rust
+use teaql_runtime::{
+    MutationDecision, MutationPlan, MutationPolicy, MutationPolicyIdentity, UserContext,
+};
+
+struct RegistryMutationPolicy;
+
+impl MutationPolicy for RegistryMutationPolicy {
+    fn identity(&self) -> MutationPolicyIdentity {
+        MutationPolicyIdentity::new(
+            "teaql-registry-write-policy",
+            "1.0.0",
+            "sha256:<reviewed-policy-fingerprint>",
+        )
+    }
+
+    fn review(&self, _context: &UserContext, plan: &MutationPlan) -> MutationDecision {
+        let missing_reason = plan
+            .audit_reason
+            .as_deref()
+            .map(str::trim)
+            .map(str::is_empty)
+            .unwrap_or(true);
+        if missing_reason {
+            return MutationDecision::deny(
+                "REGISTRY-AUDIT-REASON-REQUIRED",
+                "registry mutations require an audit reason",
+                ["audit_reason"],
+            );
+        }
+        if plan.operations.len() > 128 {
+            return MutationDecision::deny(
+                "REGISTRY-MUTATION-TOO-LARGE",
+                "one registry mutation may contain at most 128 operations",
+                ["operations"],
+            );
+        }
+        MutationDecision::allow()
+    }
+}
+```
+
+Policy 通过后，Runtime 再向可信的 `MutationPolicyApprovalProvider` 查询批准记录。批准必须同时匹配 Policy 的 `id + version + fingerprint`；只改版本号或代码指纹而沿用旧批准，都会被识别为未批准。Policy Registry、Approval Provider 和告警 Sink 都在服务端组装 `UserContext` 时安装，HTTP 或 TFP 请求不能从外部替换它们。
+
+这里还有一个值得明确的兼容边界：没有安装客户 Policy 时，Runtime 允许原有写入并产生 `MUTATION-POLICY-001`；安装了客户 Policy 但没有精确批准时，会产生 `MUTATION-POLICY-002`。这两个状态目前是治理告警，不会冒充强制审批。真正的 Policy `Deny` 则会在事务开始前终止保存，保证没有部分数据落库。允许执行时，Policy 身份、Approval 状态、告警码和变更字段摘要会随 `MutationGovernanceSnapshot` 进入审计事件，让“哪一版规则批准了哪类变更”成为可追踪证据。
+
+这对 AI Agent 尤其有意义：Agent 仍然可以高频修改对象，但能够放行写入的规则是有身份、有版本、有指纹的；策略代码变化后必须重新批准，不能静默继承上一版信任。
+
+### 5. 用 E 表达式区分“空值”和“根本没加载”
 
 Rust 的 `Option` 能表达“有值或为空”，但数据库投影还有第三种状态：字段或关联根本没有被查询。若把后两者都当成 `None`，程序可能把一个漏写 `select` 的编码错误误判成正常业务空值，并继续产生错误结果。
 
@@ -136,16 +209,29 @@ TQ 根据模型生成 `E` 表达式，保留三种状态：
 - `Null`：字段已加载，业务上确实为空；
 - `NotLoaded`：查询没有预加载该字段或关联，是程序错误。
 
-例如读取 Asset 的 Blob 关联和路径时，可以写成：
+例如读取 Asset 的 Blob 关联和路径时，查询端必须先明确选择要遍历的关联，然后再用 `E` 读取：
 
 ```rust
+let assets = Q::assets()
+    .select_self_fields()
+    .select_asset_blob()
+    .with_id_is(asset_id)
+    .limit(1)
+    .comment("what: load one asset and its blob metadata")
+    .purpose("why: verify package content before download")
+    .execute_for_list(context)
+    .await?;
+
+let asset = assets.into_iter().next().expect("asset exists");
 let blob = E::asset(&asset).get_asset_blob().eval();
 let path = E::asset(&asset)
     .get_path()
     .or_if_null("unknown-path".to_owned());
 ```
 
-`eval()` 会把已加载的值或空值转换成 `Option`，但遇到 `NotLoaded` 会带着缺失访问路径立即失败；`or_if_null(...)` 也只为真正的数据库 `NULL` 提供默认值，不会掩盖漏加载。当前服务中直接读取已完整加载的标量仍然很方便，而涉及最小投影和跨关系遍历时，E 表达式可以让“数据为空”和“程序写错了查询”保持清晰边界。这种尽早失败比在很远的业务分支里产生错误制品元数据更容易定位，也更适合 Registry 这类基础设施服务。
+`eval()` 会把已加载的值或空值转换成 `Option`，但遇到 `NotLoaded` 会带着缺失访问路径立即失败；`or_if_null(...)` 也只为真正的数据库 `NULL` 提供默认值，不会掩盖漏加载。
+
+当前模型生成的 `E` facade 已覆盖 Asset 的标量、`ContentRepository` 和 `AssetBlob` 前向关系。项目现有手写 Service 对 `select_self_fields()` 后的标量仍采用直接 accessor，尚未把跨关系读取迁移到 `E::`；所以上面的代码展示的是已经生成并验证过的安全访问能力，而不是声称所有业务路径都已完成迁移。后续涉及最小投影和跨关系遍历时，优先使用 E 表达式，可以让“数据为空”和“程序写错了查询”保持清晰边界。这种尽早失败比在很远的业务分支里产生错误制品元数据更容易定位，也更适合 Registry 这类基础设施服务。
 
 ## 五分钟启动
 

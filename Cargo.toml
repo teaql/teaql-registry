@@ -6,16 +6,6 @@ members = [
 ]
 resolver = "2"
 
-[patch.crates-io]
-# Keep the candidate reproducible before the next crates.io release. All TeaQL
-# crates are pinned to the same reviewed runtime commit (teaql-rs#120).
-teaql-core = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-teaql-macros = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-teaql-runtime = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-teaql-sql = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-teaql-data-service = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-teaql-provider-postgres = { git = "https://github.com/teaql/teaql-rs", rev = "983631b92c546bec7904b26ec5f5f653dbe61033" }
-
 [profile.release]
 opt-level = "z"
 lto = true

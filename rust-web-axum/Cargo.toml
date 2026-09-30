@@ -14,10 +14,10 @@ path = "src/main.rs"
 teaql_registry_core = { package = "teaql-registry-service-core", path = "../rust-lib-core/lib" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
-teaql-core = "4.3.3"
-teaql-runtime = "4.3.3"
-teaql-data-service = "4.3.3"
-teaql-provider-postgres = "4.3.3"
+teaql-core = "5.0.5"
+teaql-runtime = "5.0.5"
+teaql-data-service = "5.0.5"
+teaql-provider-postgres = "5.0.5"
 chrono = { version = "0.4", features = ["serde"] }
 axum = { version = "0.7", features = ["multipart", "macros"] }
 tower = { version = "0.4", features = ["util"] }
