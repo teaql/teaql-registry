@@ -42,6 +42,8 @@ Registry 的数据面有大量流式上传下载、校验、协议路由和并�
 
 Registry 很适合检验一个业务框架是否真的能处理复杂场景：它既有多租户和权限边界，又有大量列表查询，还要承受高频写入、版本竞争和跨实体关系读取。在 TeaQL Registry 中，TeaQL（下文简称 TQ）不是只负责把表映射成 Rust struct，而是把查询意图、租户上下文、变更审计、Mutation Policy 治理和数据加载状态一起带进业务代码。本文中的 Mutation Policy Approval 基于 TeaQL Rust Runtime 5.0.5。
 
+这套 TeaQL 开发工具链已经支持 Java、Rust、TypeScript、Go、Swift、.NET 和 Python 七个运行时。同一份语义模型可以生成对应语言的类型化领域库与应用工作区，并通过模型感知 Assist 提供查询、分页、创建、修改、删除和表达式等开发指导。TeaQL Registry 选择 Rust 实现，但下面这些 TQ 编程模型并不只服务于 Rust。
+
 ### 1. 在 TQ 执行入口集中实施租户隔离
 
 多租户隔离最怕依赖开发者记忆：如果要求每个 Service 都手写一次 `filter_by_tenant(...)`，迟早会有新接口漏掉。TeaQL Registry 把隔离放在 TQ 的统一执行入口 `RequestPolicy` 中。每一条查询在交给数据服务之前，都会经过 `enforce_select`；策略从可信 context 取得当前租户，并把条件与原查询合并：
@@ -233,14 +235,24 @@ let path = E::asset(&asset)
 
 当前模型生成的 `E` facade 已覆盖 Asset 的标量、`ContentRepository` 和 `AssetBlob` 前向关系。项目现有手写 Service 对 `select_self_fields()` 后的标量仍采用直接 accessor，尚未把跨关系读取迁移到 `E::`；所以上面的代码展示的是已经生成并验证过的安全访问能力，而不是声称所有业务路径都已完成迁移。后续涉及最小投影和跨关系遍历时，优先使用 E 表达式，可以让“数据为空”和“程序写错了查询”保持清晰边界。这种尽早失败比在很远的业务分支里产生错误制品元数据更容易定位，也更适合 Registry 这类基础设施服务。
 
-## 五分钟启动
+## 5 秒启动
+
+镜像和 `.env` 已准备好时，启动只有一条命令：
+
+```bash
+docker compose up -d
+```
+
+服务端和 TUI 都是 Rust 编译出的独立二进制，没有 JVM 或脚本运行时的预热过程；在本地或集群节点热启动时，应用进程通常可以在数秒内进入工作状态。这里的“5 秒”指应用自身的启动体验，首次拉取镜像以及等待 PostgreSQL、S3 就绪的时间仍取决于网络和部署环境。
+
+首次部署只需先准备仓库和环境变量：
 
 ```bash
 git clone https://github.com/teaql/teaql-registry.git
 cd teaql-registry
 cp .env.example .env
 # 在 .env 中设置 POSTGRES_PASSWORD 和 S3_SECRET_KEY
-docker compose up -d
+# 然后执行上面的 docker compose up -d
 ```
 
 启动后可访问：
@@ -262,7 +274,7 @@ cargo run -p registry-tui -- \
 
 ## 当前状态与我们希望得到的反馈
 
-仓库已经有 workspace 测试、协议生命周期测试和原生客户端验证；Cargo 与 Conan 2 已通过真实客户端发布/消费流程。不同生态的边角兼容性仍然很多，尤其是代理/聚合仓库行为、签名元数据以及各版本客户端差异，这些正是我们接下来希望继续打磨的部分。
+仓库已经有 workspace 测试、协议生命周期测试和覆盖多个生态的原生客户端验证。不同生态的边角兼容性仍然很多，尤其是代理/聚合仓库行为、签名元数据以及各版本客户端差异，这些正是我们接下来希望继续打磨的部分。
 
 如果你正在做 AI Agent、内部构建平台、离线开发环境，或者只是对“用 Rust 实现多协议 Registry”感兴趣，欢迎试用、提 Issue 或 PR。我们尤其希望听到下面几类反馈：
 
