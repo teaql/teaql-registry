@@ -81,7 +81,7 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - Zero-dependency, 2.6 MB single static binary built with Ratatui.
   - Designed for SSH jump host / bastion environments where browser access is unavailable.
   - Interactive login with password masking, connection verification before entering the UI.
-  - Tabs: Overview & Metrics, Repositories, Artifact Search, Quick Ops (GC, cleanup, token generation).
+  - Command-driven transcript for status, repositories, artifact search, inspection, GC, cleanup, and token generation.
 - **Per-Tenant Service Logs**:
   - Best-effort operational history for artifact upload/download operations; it is isolated from the durable TeaQL mutation audit ledger and never blocks artifact traffic.
   - Records event time, username, client IP, action, repository, artifact path, content size, and status.
@@ -160,19 +160,26 @@ export REGISTRY_PASSWORD=<password>
 registry-tui
 ```
 
+<p align="center">
+  <img src="docs/images/teaql-registry-tui.png" alt="TeaQL Registry TUI connected to a live local registry" width="100%">
+</p>
+
+<p align="center"><em>Live local registry: system health, repository inventory, and interactive operations over SSH-friendly TUI.</em></p>
+
 **TUI Controls**:
 
-| Key | Action |
+| Input | Action |
 |---|---|
-| `1`-`4` | Switch tabs |
-| `Tab` / `Shift+Tab` | Cycle tabs |
-| `/` | Search artifacts |
-| `j`/`k` or `↑`/`↓` | Navigate lists |
-| `r` | Refresh data |
-| `g` | Run garbage collection |
-| `c` | Run retention cleanup |
-| `t` | Generate temporary token |
-| `q` | Quit |
+| `status` | Refresh system status |
+| `repos` | List repositories |
+| `comps [repo]` | List components, optionally filtered by repository |
+| `search <keyword>` | Search artifacts |
+| `inspect [name]` | Inspect the selected or named item |
+| `gc` / `cleanup [repo]` | Run storage maintenance |
+| `token` | Generate a temporary token |
+| `↑` / `↓` | Navigate the active list or command history |
+| `PageUp` / `PageDown` | Scroll the transcript |
+| `help` / `q` | Show help / quit |
 
 ### 3. Seed Demo Packages
 
