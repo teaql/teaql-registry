@@ -127,7 +127,7 @@ docker compose up -d --pull always
 ```
 
 The Compose stack pulls the public multi-architecture image from
-`ghcr.io/teaql/teaql-registry:latest` and starts PostgreSQL, RustFS, and the
+`docker.io/teaql/teaql-registry:latest` from Docker Hub and starts PostgreSQL, RustFS, and the
 Registry together. Set `TEAQL_REGISTRY_IMAGE` in `.env` to pin a release tag
 or immutable `sha-...` image tag.
 

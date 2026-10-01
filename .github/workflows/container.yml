@@ -16,7 +16,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: write
     with:
       output: image
       push: true
@@ -25,7 +24,7 @@ jobs:
       cache-mode: max
       sbom: true
       set-meta-labels: true
-      meta-images: ghcr.io/teaql/teaql-registry
+      meta-images: docker.io/teaql/teaql-registry
       meta-tags: |
         type=raw,value=latest,enable={{is_default_branch}}
         type=sha,prefix=sha-
@@ -34,6 +33,6 @@ jobs:
         type=semver,pattern={{major}}.{{minor}}
     secrets:
       registry-auths: |
-        - registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        - registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
