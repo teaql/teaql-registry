@@ -237,6 +237,14 @@ let path = E::asset(&asset).get_path().unwrap();
 
 当前实现已经把这套规则落到了主要读取链路，而不再只是示例。Asset、AssetBlob 和 Component 查询使用明确投影；下载、搜索、清理以及各制品生态的读取路径会一次性选择 `AssetBlob` 关系，再在 Service 边界通过 `E` 构造只读模型。这样既消除了逐个 `asset_blob_id` 回查造成的 N+1，也让漏掉关系投影时立即以 `NotLoaded` 暴露。集成测试同时覆盖了“标量已投影可正常读取”“关系未投影必须快速失败”“关系投影后可读取”，以及稳定、互不重叠的生成式分页。写入仍然使用生成的 `update_*`、`audit_as(...)` 和 context-only save；`E` 只负责安全读取，不混入 mutation 路径。
 
+为了让这条规则不只依赖开发者或 AI 的自觉，`cargo teaql` 还提供了按语言拆分的本地检查命令，覆盖 Rust、Java、Kotlin、Python、C#、Go、Swift 和 TypeScript。检查器从 KSML/XML 模型识别实体关系，并验证应用代码是否绕过生成的 `E` facade；找不到关系元数据或可用的 `E` 时会失败关闭，而不会给出“假通过”。例如 TypeScript 检查同时解析 `.ts` 和 `.tsx`：
+
+```bash
+cargo teaql typescript-expression-check --source src --format json
+```
+
+`item.platform?.name` 这样的直接关联遍历会报告 `TQL-TYPESCRIPT-EXPR-001`，而 `E.workItem(item).platform().name().eval()` 可以通过。确有历史兼容需求时，可以在 `.teaql/typescript-expression-check.yml` 中记录精确到文件、函数、规则号且带原因的审计例外，避免用宽泛忽略把检查整体关掉。
+
 ## 5 秒启动
 
 镜像和 `.env` 已准备好时，启动只有一条命令：
