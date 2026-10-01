@@ -1,9 +1,6 @@
 services:
   teaql-registry:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: teaql/teaql-registry:latest
+    image: ${TEAQL_REGISTRY_IMAGE:-ghcr.io/teaql/teaql-registry:latest}
     container_name: teaql-registry
     ports:
       - "8081:8081"

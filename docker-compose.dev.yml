@@ -1,0 +1,6 @@
+services:
+  teaql-registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: teaql/teaql-registry:dev

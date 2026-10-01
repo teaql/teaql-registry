@@ -119,9 +119,22 @@ teaql-registry/
 ### 1. Run with Docker Compose (Recommended)
 
 ```bash
+git clone https://github.com/teaql/teaql-registry.git
+cd teaql-registry
 cp .env.example .env
 # Set POSTGRES_PASSWORD and S3_SECRET_KEY to non-empty local secrets.
-docker compose up -d
+docker compose up -d --pull always
+```
+
+The Compose stack pulls the public multi-architecture image from
+`ghcr.io/teaql/teaql-registry:latest` and starts PostgreSQL, RustFS, and the
+Registry together. Set `TEAQL_REGISTRY_IMAGE` in `.env` to pin a release tag
+or immutable `sha-...` image tag.
+
+For local image development, build the current checkout through the override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 Service endpoints will be available at:

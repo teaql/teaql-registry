@@ -36,6 +36,10 @@ RUN mkdir -m 1777 /app/runtime-tmp
 # Stage 2: Ultra-minimal Scratch Runtime
 FROM scratch
 
+LABEL org.opencontainers.image.source="https://github.com/teaql/teaql-registry" \
+      org.opencontainers.image.description="AI-native multi-format artifact registry" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/target/release/teaql-registry /teaql-registry
 COPY --from=builder /app/runtime-tmp /tmp

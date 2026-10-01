@@ -250,10 +250,10 @@ cargo teaql typescript-expression-check --source src --format json
 镜像和 `.env` 已准备好时，启动只有一条命令：
 
 ```bash
-docker compose up -d
+docker compose up -d --pull always
 ```
 
-服务端和 TUI 都是 Rust 编译出的独立二进制，没有 JVM 或脚本运行时的预热过程；在本地或集群节点热启动时，应用进程通常可以在数秒内进入工作状态。这里的“5 秒”指应用自身的启动体验，首次拉取镜像以及等待 PostgreSQL、S3 就绪的时间仍取决于网络和部署环境。
+Compose 默认从 `ghcr.io/teaql/teaql-registry:latest` 拉取公开的 amd64/arm64 镜像，并一起启动 PostgreSQL、RustFS 和 Registry。服务端和 TUI 都是 Rust 编译出的独立二进制，没有 JVM 或脚本运行时的预热过程；在本地或集群节点热启动时，应用进程通常可以在数秒内进入工作状态。这里的“5 秒”指应用自身的启动体验，首次拉取镜像以及等待 PostgreSQL、S3 就绪的时间仍取决于网络和部署环境。
 
 首次部署只需先准备仓库和环境变量：
 

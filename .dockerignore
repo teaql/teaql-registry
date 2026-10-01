@@ -1,0 +1,15 @@
+.git
+.github
+.env
+target
+**/target
+console/node_modules
+console/.vite
+ci-evidence
+evidence
+examples
+demo-components
+registry-tui
+docs
+benchmarks
+*.log
