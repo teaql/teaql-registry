@@ -186,18 +186,18 @@ impl DockerEngine {
         };
 
         let path = format!("/v2/{}/blobs/{}", image_name, digest);
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
-            Some(a) => a,
+        let asset =
+            match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &path).await? {
+                Some(a) => a,
+                None => return Ok(None),
+            };
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-
-        match blobstore.read_blob(&asset_blob.blob_ref()).await {
-            Ok(data) => Ok(Some((data, asset_blob.content_type().to_string()))),
+        match blobstore.read_blob(blob.blob_ref()).await {
+            Ok(data) => Ok(Some((data, blob.content_type().to_owned()))),
             Err(_) => Ok(None),
         }
     }
@@ -214,20 +214,17 @@ impl DockerEngine {
         };
 
         let path = format!("/v2/{}/blobs/{}", image_name, digest);
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
-            Some(a) => a,
+        let asset =
+            match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &path).await? {
+                Some(a) => a,
+                None => return Ok(None),
+            };
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-
-        Ok(Some((
-            asset_blob.blob_size(),
-            asset_blob.content_type().to_string(),
-        )))
+        Ok(Some((blob.blob_size(), blob.content_type().to_owned())))
     }
 
     pub async fn put_manifest(
@@ -323,20 +320,20 @@ impl DockerEngine {
         };
 
         let path = format!("/v2/{}/manifests/{}", image_name, reference);
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
-            Some(a) => a,
+        let asset =
+            match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &path).await? {
+                Some(a) => a,
+                None => return Ok(None),
+            };
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-
-        match blobstore.read_blob(&asset_blob.blob_ref()).await {
+        match blobstore.read_blob(blob.blob_ref()).await {
             Ok(data) => {
                 let digest = compute_sha256_digest(&data);
-                Ok(Some((data, asset_blob.content_type().to_string(), digest)))
+                Ok(Some((data, blob.content_type().to_owned(), digest)))
             }
             Err(_) => Ok(None),
         }

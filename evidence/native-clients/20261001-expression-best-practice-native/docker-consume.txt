@@ -1,0 +1,8 @@
+native-probe-20261001-expression-best-practice-native: Pulling from docker-hosted
+85b597208ff9: Pulling fs layer
+85b597208ff9: Verifying Checksum
+85b597208ff9: Download complete
+85b597208ff9: Pull complete
+Digest: sha256:2fd27e29e5ab8cf792945c9a013d34fc966bf26e9da2e1977609faedd583dfc1
+Status: Downloaded newer image for 127.0.0.1:18085/docker-hosted:native-probe-20261001-expression-best-practice-native
+127.0.0.1:18085/docker-hosted:native-probe-20261001-expression-best-practice-native

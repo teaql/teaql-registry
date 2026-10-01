@@ -51,15 +51,20 @@ impl SwiftEngine {
         content_repository_id: u64,
         path: &str,
     ) -> Result<Option<(Bytes, String, String)>> {
-        let Some(asset) = AssetService::find_by_path(ctx, content_repository_id, path).await?
+        let Some(asset) =
+            AssetService::find_by_path_with_blob(ctx, content_repository_id, path).await?
         else {
             return Ok(None);
         };
-        let Some(blob) = AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? else {
+        let Some(blob) = asset.blob() else {
             return Ok(None);
         };
-        let bytes = blobstore.read_blob(&blob.blob_ref()).await?;
-        Ok(Some((bytes, blob.content_type(), blob.sha256_checksum())))
+        let bytes = blobstore.read_blob(blob.blob_ref()).await?;
+        Ok(Some((
+            bytes,
+            blob.content_type().to_owned(),
+            blob.sha256_checksum().to_owned(),
+        )))
     }
 
     async fn persist_asset(
@@ -256,14 +261,14 @@ impl SwiftEngine {
             return Ok(None);
         }
         matching.sort_by(|left, right| {
-            let left = semver::Version::parse(&left.version_name()).ok();
-            let right = semver::Version::parse(&right.version_name()).ok();
+            let left = semver::Version::parse(left.version_name()).ok();
+            let right = semver::Version::parse(right.version_name()).ok();
             right.cmp(&left)
         });
         let releases = matching
             .into_iter()
             .map(|component| {
-                let version = component.version_name();
+                let version = component.version_name().to_owned();
                 let url = format!(
                     "{}/{}/{}/{}",
                     base_url.trim_end_matches('/'),
@@ -418,9 +423,9 @@ impl SwiftEngine {
             .filter(|component| component.kind() == "swift-package")
         {
             let path = Self::release_path(
-                &component.namespace(),
-                &component.name(),
-                &component.version_name(),
+                component.namespace(),
+                component.name(),
+                component.version_name(),
             );
             let Ok(Some((stored, _, _))) =
                 Self::read_asset(ctx, blobstore, content_repository_id, &path).await

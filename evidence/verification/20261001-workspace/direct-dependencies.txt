@@ -1,0 +1,51 @@
+teaql-registry v0.1.0 (/tmp/teaql-registry-verify.vxTanI/rust-web-axum)
+├── anyhow v1.0.104
+├── argon2 v0.5.3
+├── async-trait v0.1.92 (proc-macro)
+├── axum v0.7.9
+├── base64 v0.22.1
+├── bytes v1.12.1
+├── chrono v0.4.45
+├── deadpool-postgres v0.14.1
+├── flate2 v1.1.10
+├── futures-util v0.3.34
+├── hex v0.4.3
+├── hmac v0.12.1
+├── http v1.5.0
+├── md-5 v0.10.6
+├── mime_guess v2.0.5
+│   [build-dependencies]
+├── multer v3.1.0
+│   [build-dependencies]
+├── prost v0.13.5
+├── quick-xml v0.36.2
+├── rand v0.8.7
+├── regex v1.13.1
+├── reqwest v0.12.28
+├── rsa v0.9.10
+├── rust-embed v8.12.0
+├── semver v1.0.28
+├── serde v1.0.229
+├── serde_json v1.0.151
+├── serde_yaml v0.9.34+deprecated
+├── sha1 v0.10.7
+├── sha2 v0.10.9
+├── tar v0.4.46
+├── teaql-core v5.0.5
+├── teaql-data-service v5.0.5
+├── teaql-provider-postgres v5.0.5
+├── teaql-registry-service-core v0.1.0 (/tmp/teaql-registry-verify.vxTanI/rust-lib-core/lib)
+├── teaql-runtime v5.0.5
+├── thiserror v1.0.69
+├── tokio v1.53.1
+├── tokio-postgres v0.7.18
+├── tokio-util v0.7.19
+├── tower v0.4.13
+├── tower-http v0.5.2
+├── tracing v0.1.44
+├── tracing-subscriber v0.3.23
+├── uuid v1.24.0
+├── zip v2.4.2
+└── zxcvbn v3.1.1
+[dev-dependencies]
+└── tempfile v3.27.0

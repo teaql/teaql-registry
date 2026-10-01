@@ -1,0 +1,6 @@
+
+WARNING! Your credentials are stored unencrypted in '/tmp/teaql-registry-native.sID1KP/docker/config/config.json'.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/go/credential-store/
+
+Login Succeeded

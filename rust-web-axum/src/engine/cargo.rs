@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use sha2::Digest;
-use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime, Q};
+use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
 use crate::blobstore::BlobStore;
 use crate::format::cargo::{CargoIndexConfig, CargoIndexRecord};
@@ -119,23 +119,17 @@ impl CargoEngine {
         let mut matching = Vec::new();
         let mut offset = 0;
         loop {
-            let page = Q::components()
-                .select_self_fields()
-                .filter_by_content_repository(content_repo.id())
-                .with_name_is(crate_name)
-                .order_by_id_asc()
-                .offset(offset, PAGE_SIZE)
-                .comment("what: read all stored versions of one Cargo crate")
-                .purpose("why: construct a complete sparse-index response")
-                .execute_for_list(ctx)
-                .await
-                .map_err(|error| anyhow!("Cargo component lookup failed: {error}"))?;
+            let page = ComponentService::list_by_name(
+                ctx,
+                content_repo.id(),
+                crate_name,
+                PAGE_SIZE,
+                offset,
+            )
+            .await
+            .map_err(|error| anyhow!("Cargo component lookup failed: {error}"))?;
             let page_len = page.len();
-            matching.extend(page.into_iter().filter(|component| {
-                !component.name().is_empty()
-                    && !component.name().starts_with("[DELETED")
-                    && component.kind() != "deleted"
-            }));
+            matching.extend(page);
             if page_len < PAGE_SIZE as usize {
                 break;
             }
@@ -150,22 +144,23 @@ impl CargoEngine {
         for c in matching {
             let version = c.version_name();
             let index_path = format!("/cargo/index-record/{crate_name}/{version}");
-            let asset = AssetService::find_by_path(ctx, content_repo.id(), &index_path)
+            let asset = AssetService::find_by_path_with_blob(ctx, content_repo.id(), &index_path)
                 .await?
                 .ok_or_else(|| anyhow!("Cargo index metadata missing for {crate_name}@{version}; republish or migrate this legacy artifact"))?;
-            let index_blob = AssetService::get_asset_blob(ctx, asset.asset_blob_id())
-                .await?
+            let index_blob = asset
+                .blob()
                 .ok_or_else(|| anyhow!("Cargo index blob missing for {crate_name}@{version}"))?;
-            let index_data = blobstore.read_blob(&index_blob.blob_ref()).await?;
+            let index_data = blobstore.read_blob(index_blob.blob_ref()).await?;
             let record: CargoIndexRecord = serde_json::from_slice(&index_data)?;
             let tarball_path = format!("/api/v1/crates/{crate_name}/{version}/download");
-            let tarball = AssetService::find_by_path(ctx, content_repo.id(), &tarball_path)
-                .await?
-                .ok_or_else(|| anyhow!("Cargo archive missing for {crate_name}@{version}"))?;
-            let tarball_blob = AssetService::get_asset_blob(ctx, tarball.asset_blob_id())
-                .await?
+            let tarball =
+                AssetService::find_by_path_with_blob(ctx, content_repo.id(), &tarball_path)
+                    .await?
+                    .ok_or_else(|| anyhow!("Cargo archive missing for {crate_name}@{version}"))?;
+            let tarball_blob = tarball
+                .blob()
                 .ok_or_else(|| anyhow!("Cargo archive blob missing for {crate_name}@{version}"))?;
-            let archive = blobstore.read_blob(&tarball_blob.blob_ref()).await?;
+            let archive = blobstore.read_blob(tarball_blob.blob_ref()).await?;
             let checksum = hex::encode(sha2::Sha256::digest(&archive));
             anyhow::ensure!(
                 record.name == crate_name && record.vers == version && record.cksum == checksum,
@@ -190,17 +185,17 @@ impl CargoEngine {
         };
 
         let path = format!("/api/v1/crates/{}/{}/download", crate_name, version);
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
-            Some(a) => a,
+        let asset =
+            match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &path).await? {
+                Some(a) => a,
+                None => return Ok(None),
+            };
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-
-        match blobstore.read_blob(&asset_blob.blob_ref()).await {
+        match blobstore.read_blob(blob.blob_ref()).await {
             Ok(data) => Ok(Some(data)),
             Err(_) => Ok(None),
         }

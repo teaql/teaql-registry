@@ -1,0 +1,10 @@
+format	publish	consume
+Cargo	PASS	PASS
+Maven	PASS	PASS
+npm	PASS	PASS
+PyPI	PASS	PASS
+GoMod	N/A	PASS
+NuGet	PASS	PASS
+Swift	PASS	PASS
+Docker	PASS	PASS
+Raw	PASS	PASS

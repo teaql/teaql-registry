@@ -15,6 +15,12 @@ DOCKER_IMAGE=""
 SOURCE_GIT_COMMIT="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
 SOURCE_GIT_DIRTY="$(if [[ -z "$(git -C "${REPOSITORY_ROOT}" status --porcelain)" ]]; then echo false; else echo true; fi)"
 
+if [[ -e "${RESULTS_DIR}" ]]; then
+  echo "error: native-client evidence already exists: ${RESULTS_DIR}" >&2
+  echo "hint: choose a new NATIVE_RUN_ID or NATIVE_RESULTS_DIR" >&2
+  exit 2
+fi
+
 if [[ -f "${CREDENTIALS_DIR}/global-admin.txt" ]]; then
   ADMIN_PASSWORD_VALUE="$(sed -n 's/^admin \/ //p' "${CREDENTIALS_DIR}/global-admin.txt" | head -n 1)"
 else
@@ -85,6 +91,7 @@ TOKEN_ID="$(jq -er '.pat.id' <<<"${TOKEN_RESPONSE}")"
   echo "git_commit=${SOURCE_GIT_COMMIT}"
   echo "git_dirty=${SOURCE_GIT_DIRTY}"
   echo "registry_url=${REGISTRY_URL}"
+  echo "read_profile=${NATIVE_READ_PROFILE:-unspecified}"
   echo "maven=$(mvn --version | head -n 1)"
   echo "npm=$(npm --version)"
   echo "python=$(python3 --version 2>&1)"

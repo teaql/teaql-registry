@@ -172,17 +172,18 @@ impl NpmEngine {
         } else {
             format!("/{}", path)
         };
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &clean_path).await? {
+        let asset = match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &clean_path)
+            .await?
+        {
             Some(a) => a,
             None => return Ok(None),
         };
-
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        match blobstore.read_blob(&asset_blob.blob_ref()).await {
+        match blobstore.read_blob(blob.blob_ref()).await {
             Ok(data) => Ok(Some(data)),
             Err(_) => Ok(None),
         }

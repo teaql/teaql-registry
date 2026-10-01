@@ -9,7 +9,7 @@ use crate::format::conan::{
     validate_conan_coordinate, validate_conan_file_path, ConanFileSnapshot, ConanRevision,
     ConanRevisions,
 };
-use crate::services::{AssetService, ComponentService, RepositoryService};
+use crate::services::{AssetService, ComponentService, LoadedComponent, RepositoryService};
 
 const CONAN_TIMESTAMP: &str = "2026-01-01T00:00:00.000000Z";
 
@@ -89,14 +89,15 @@ impl ConanEngine {
         content_repository_id: u64,
         path: &str,
     ) -> Result<Option<Bytes>> {
-        let Some(asset) = AssetService::find_by_path(ctx, content_repository_id, path).await?
+        let Some(asset) =
+            AssetService::find_by_path_with_blob(ctx, content_repository_id, path).await?
         else {
             return Ok(None);
         };
-        let Some(blob) = AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? else {
+        let Some(blob) = asset.blob() else {
             return Ok(None);
         };
-        Ok(Some(blobstore.read_blob(&blob.blob_ref()).await?))
+        Ok(Some(blobstore.read_blob(blob.blob_ref()).await?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -243,7 +244,7 @@ impl ConanEngine {
     async fn components(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
-    ) -> Result<Vec<Component>> {
+    ) -> Result<Vec<LoadedComponent>> {
         let Some(content_repository) =
             RepositoryService::get_content_repository(ctx, repo.id()).await?
         else {
@@ -353,7 +354,7 @@ impl ConanEngine {
         user: &str,
         channel: &str,
         revision: &str,
-    ) -> Result<Option<Component>> {
+    ) -> Result<Option<LoadedComponent>> {
         Self::validate_reference(name, version, user, channel, Some(revision))?;
         Ok(Self::components(ctx, repo)
             .await?
@@ -368,7 +369,7 @@ impl ConanEngine {
 
     async fn snapshot_for_component(
         ctx: &ServiceRuntime,
-        component: &Component,
+        component: &LoadedComponent,
         prefix: &str,
     ) -> Result<ConanFileSnapshot> {
         let files = AssetService::list_by_component(ctx, component.id())
@@ -449,7 +450,7 @@ impl ConanEngine {
         channel: &str,
         recipe_revision: &str,
         package_id: Option<&str>,
-    ) -> Result<Vec<Component>> {
+    ) -> Result<Vec<LoadedComponent>> {
         Self::validate_reference(name, version, user, channel, Some(recipe_revision))?;
         if let Some(package_id) = package_id {
             validate_conan_coordinate(package_id, "package ID")?;
@@ -489,7 +490,7 @@ impl ConanEngine {
         )
         .await?
         .into_iter()
-        .map(|component| (component.id(), component.version_name()))
+        .map(|component| (component.id(), component.version_name().to_owned()))
         .collect::<Vec<_>>();
         revisions.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
         Ok(ConanRevisions {
@@ -514,7 +515,7 @@ impl ConanEngine {
         recipe_revision: &str,
         package_id: &str,
         package_revision: &str,
-    ) -> Result<Option<Component>> {
+    ) -> Result<Option<LoadedComponent>> {
         Ok(Self::matching_package_components(
             ctx,
             repo,
@@ -646,7 +647,7 @@ impl ConanEngine {
         .await?;
         let mut packages = Map::new();
         for component in components {
-            if packages.contains_key(&component.name()) {
+            if packages.contains_key(component.name()) {
                 continue;
             }
             let path = format!(
@@ -657,15 +658,15 @@ impl ConanEngine {
                     user,
                     channel,
                     recipe_revision,
-                    &component.name(),
-                    &component.version_name(),
+                    component.name(),
+                    component.version_name(),
                 )
             );
             let content = Self::read_asset(ctx, blobstore, content_repository.id(), &path)
                 .await?
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
                 .unwrap_or_default();
-            packages.insert(component.name(), json!({ "content": content }));
+            packages.insert(component.name().to_owned(), json!({ "content": content }));
         }
         Ok(Value::Object(packages))
     }

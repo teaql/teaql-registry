@@ -1,0 +1,2 @@
+warn : You are running the 'add source' operation with an 'HTTP' source, 'http://127.0.0.1:18085/repository/nuget-hosted/v3/index.json'. Non-HTTPS access will be removed in a future version. Consider migrating to an 'HTTPS' source.
+Package source with Name: teaql-native added successfully.

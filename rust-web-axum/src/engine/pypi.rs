@@ -143,18 +143,19 @@ impl PyPiEngine {
         }
 
         let assets =
-            AssetService::list_by_content_repository(ctx, content_repo.id(), 100, 0).await?;
+            AssetService::list_by_content_repository_with_blobs(ctx, content_repo.id(), 100, 0)
+                .await?;
         let mut files = Vec::new();
 
         for a in assets {
             let comp_id = a.component_id();
             if comp_id > 0 && matching.iter().any(|m| m.id() == comp_id as u64) {
                 let filename = a.path().trim_start_matches("/packages/").to_string();
-                if let Ok(Some(blob)) = AssetService::get_asset_blob(ctx, a.asset_blob_id()).await {
+                if let Some(blob) = a.blob() {
                     files.push(PyPiFileEntry {
                         filename: filename.clone(),
                         url: format!("../../packages/{}", filename),
-                        sha256: blob.sha256_checksum().to_string(),
+                        sha256: blob.sha256_checksum().to_owned(),
                     });
                 }
             }
@@ -178,18 +179,18 @@ impl PyPiEngine {
         };
 
         let path = format!("/packages/{}", filename);
-        let asset = match AssetService::find_by_path(ctx, content_repo.id(), &path).await? {
-            Some(a) => a,
+        let asset =
+            match AssetService::find_by_path_with_blob(ctx, content_repo.id(), &path).await? {
+                Some(a) => a,
+                None => return Ok(None),
+            };
+        let blob = match asset.blob() {
+            Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let asset_blob = match AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-
-        match blobstore.read_blob(&asset_blob.blob_ref()).await {
-            Ok(data) => Ok(Some((data, asset_blob.content_type().to_string()))),
+        match blobstore.read_blob(blob.blob_ref()).await {
+            Ok(data) => Ok(Some((data, blob.content_type().to_owned()))),
             Err(_) => Ok(None),
         }
     }

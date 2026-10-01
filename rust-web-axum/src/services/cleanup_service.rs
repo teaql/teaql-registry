@@ -60,13 +60,12 @@ impl CleanupService {
                             continue;
                         }
 
-                        let assets = AssetService::list_by_component(ctx, comp.id()).await?;
+                        let assets =
+                            AssetService::list_by_component_with_blobs(ctx, comp.id()).await?;
                         for asset in assets {
-                            if let Ok(Some(blob)) =
-                                AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await
-                            {
+                            if let Some(blob) = asset.blob() {
                                 report.freed_bytes += blob.blob_size();
-                                let _ = blobstore.delete_blob(&blob.blob_ref()).await;
+                                let _ = blobstore.delete_blob(blob.blob_ref()).await;
                                 let _ = AssetService::delete_asset_blob(ctx, blob.id()).await;
                             }
                             let _ = AssetService::delete(ctx, asset.id()).await;

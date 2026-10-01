@@ -1,0 +1,6 @@
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.info
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.info: 200 OK (0.006s)
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.mod
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.mod: 200 OK (0.006s)
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.zip
+# get http://127.0.0.1:18085/repository/gomod-hosted/gomod/example.com/teaql/nativeprobe20261001-expression-best-practice-native/@v/v0.0.1.zip: 200 OK (0.103s)

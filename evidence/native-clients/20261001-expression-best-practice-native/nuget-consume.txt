@@ -1,0 +1,5 @@
+info : X.509 certificate chain validation will use the fallback certificate bundle at '/usr/lib/dotnet/sdk/8.0.130/trustedroots/codesignctl.pem'.
+info : X.509 certificate chain validation will use the fallback certificate bundle at '/usr/lib/dotnet/sdk/8.0.130/trustedroots/timestampctl.pem'.
+info : Adding PackageReference for package 'TeaQL.Native.Probe.20261001-expression-best-practice-native' into project '/tmp/teaql-registry-native.sID1KP/nuget/consumer/TeaQL.Native.Consumer.csproj'.
+warn : --no-restore|-n flag was used. No compatibility check will be done and the added package reference will be unconditional.
+info : PackageReference for package 'TeaQL.Native.Probe.20261001-expression-best-practice-native' version '0.0.1' added to file '/tmp/teaql-registry-native.sID1KP/nuget/consumer/TeaQL.Native.Consumer.csproj'.

@@ -129,31 +129,26 @@ pub async fn handle_search_components(
             }
 
             // Fetch assets for this component
-            let assets: Vec<_> = AssetService::list_by_component(&request.runtime, comp.id())
-                .await
-                .unwrap_or_default();
+            let assets: Vec<_> =
+                AssetService::list_by_component_with_blobs(&request.runtime, comp.id())
+                    .await
+                    .unwrap_or_default();
 
             let mut asset_items = Vec::new();
             for asset in assets {
-                let asset_blob =
-                    AssetService::get_asset_blob(&request.runtime, asset.asset_blob_id())
-                        .await
-                        .ok()
-                        .flatten();
-
                 let mut checksums = HashMap::new();
-                let (size, content_type) = if let Some(ref blob) = asset_blob {
-                    checksums.insert("sha1".to_string(), blob.sha1_checksum().to_string());
-                    checksums.insert("sha256".to_string(), blob.sha256_checksum().to_string());
-                    checksums.insert("md5".to_string(), blob.md5_checksum().to_string());
-                    (blob.blob_size(), blob.content_type().to_string())
+                let (size, content_type) = if let Some(blob) = asset.blob() {
+                    checksums.insert("sha1".to_string(), blob.sha1_checksum().to_owned());
+                    checksums.insert("sha256".to_string(), blob.sha256_checksum().to_owned());
+                    checksums.insert("md5".to_string(), blob.md5_checksum().to_owned());
+                    (blob.blob_size(), blob.content_type().to_owned())
                 } else {
                     (0, "application/octet-stream".to_string())
                 };
 
                 asset_items.push(SearchAssetItem {
                     id: asset.id(),
-                    path: asset.path().to_string(),
+                    path: asset.path().to_owned(),
                     download_url: format!("/repository/{}{}", repo.name(), asset.path()),
                     format: content_repo.format_name().to_string(),
                     repository: repo.name().to_string(),
@@ -231,11 +226,17 @@ pub async fn handle_search_assets(
                 _ => continue,
             };
 
-        let assets =
-            match AssetService::list_by_repository(&request.runtime, content_repo.id()).await {
-                Ok(a) => a,
-                _ => continue,
-            };
+        let assets = match AssetService::list_by_content_repository_with_blobs(
+            &request.runtime,
+            content_repo.id(),
+            1000,
+            0,
+        )
+        .await
+        {
+            Ok(a) => a,
+            _ => continue,
+        };
 
         for asset in assets {
             if let Some(ref kw) = params.keyword {
@@ -244,24 +245,19 @@ pub async fn handle_search_assets(
                 }
             }
 
-            let asset_blob = AssetService::get_asset_blob(&request.runtime, asset.asset_blob_id())
-                .await
-                .ok()
-                .flatten();
-
             let mut checksums = HashMap::new();
-            let (size, content_type) = if let Some(ref blob) = asset_blob {
-                checksums.insert("sha1".to_string(), blob.sha1_checksum().to_string());
-                checksums.insert("sha256".to_string(), blob.sha256_checksum().to_string());
-                checksums.insert("md5".to_string(), blob.md5_checksum().to_string());
-                (blob.blob_size(), blob.content_type().to_string())
+            let (size, content_type) = if let Some(blob) = asset.blob() {
+                checksums.insert("sha1".to_string(), blob.sha1_checksum().to_owned());
+                checksums.insert("sha256".to_string(), blob.sha256_checksum().to_owned());
+                checksums.insert("md5".to_string(), blob.md5_checksum().to_owned());
+                (blob.blob_size(), blob.content_type().to_owned())
             } else {
                 (0, "application/octet-stream".to_string())
             };
 
             asset_results.push(SearchAssetItem {
                 id: asset.id(),
-                path: asset.path().to_string(),
+                path: asset.path().to_owned(),
                 download_url: format!("/repository/{}{}", repo.name(), asset.path()),
                 format: content_repo.format_name().to_string(),
                 repository: repo.name().to_string(),

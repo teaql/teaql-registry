@@ -1,0 +1,25 @@
+suite	passed	failed
+registry-tui unit	11	0
+registry format unit	13	0
+blobstore integration	9	0
+cleanup policy integration	1	0
+Docker format unit	3	0
+Docker registry integration	2	0
+repository engine integration	3	0
+garbage collection integration	1	0
+core HTTP integration	4	0
+Maven format unit	6	0
+memory mode integration	1	0
+metrics integration	1	0
+multi-format integration	13	0
+multitenancy integration	2	0
+proxy cache integration	1	0
+Raw format unit	2	0
+REST API integration	5	0
+search integration	1	0
+security and RBAC	8	0
+service layer integration	4	0
+personal access token integration	2	0
+embedded UI integration	1	0
+webhook integration	1	0
+TOTAL	95	0

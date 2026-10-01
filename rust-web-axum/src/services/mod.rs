@@ -9,10 +9,10 @@ pub mod seed_data;
 pub mod service_log;
 pub mod tenant_service;
 
-pub use asset_service::AssetService;
+pub use asset_service::{AssetService, LoadedAsset, LoadedAssetBlob};
 pub use blob_store_service::BlobStoreService;
 pub use cleanup_service::{CleanupPolicy, CleanupReport, CleanupService};
-pub use component_service::ComponentService;
+pub use component_service::{ComponentService, LoadedComponent};
 pub use gc_service::{BlobStoreGcService, GcReport};
 pub use repository_service::RepositoryService;
 pub use security_service::SecurityService;

@@ -23,7 +23,7 @@ pub async fn handle_metrics(
     let repos = RepositoryService::list(&request.runtime)
         .await
         .unwrap_or_default();
-    let assets = AssetService::list_all_assets(&request.runtime)
+    let referenced_asset_blob_ids = AssetService::list_all_referenced_blob_ids(&request.runtime)
         .await
         .unwrap_or_default();
     let blobs = AssetService::list_all_blobs(&request.runtime)
@@ -54,7 +54,10 @@ pub async fn handle_metrics(
 
     body.push_str("# HELP teaql_registry_assets_count Total number of artifact assets\n");
     body.push_str("# TYPE teaql_registry_assets_count gauge\n");
-    body.push_str(&format!("teaql_registry_assets_count {}\n\n", assets.len()));
+    body.push_str(&format!(
+        "teaql_registry_assets_count {}\n\n",
+        referenced_asset_blob_ids.len()
+    ));
 
     body.push_str(
         "# HELP teaql_registry_storage_bytes_total Total size of stored artifact blobs in bytes\n",

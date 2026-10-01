@@ -214,9 +214,13 @@ TQ 根据模型生成 `E` 表达式，保留三种状态：
 例如读取 Asset 的 Blob 关联和路径时，查询端必须先明确选择要遍历的关联，然后再用 `E` 读取：
 
 ```rust
-let assets = Q::assets()
-    .select_self_fields()
-    .select_asset_blob()
+let assets = Q::assets_minimal()
+    .select_path()
+    .select_asset_blob_with(
+        Q::asset_blobs_minimal()
+            .select_blob_ref()
+            .select_sha256_checksum(),
+    )
     .with_id_is(asset_id)
     .limit(1)
     .comment("what: load one asset and its blob metadata")
@@ -226,14 +230,12 @@ let assets = Q::assets()
 
 let asset = assets.into_iter().next().expect("asset exists");
 let blob = E::asset(&asset).get_asset_blob().eval();
-let path = E::asset(&asset)
-    .get_path()
-    .or_if_null("unknown-path".to_owned());
+let path = E::asset(&asset).get_path().unwrap();
 ```
 
 `eval()` 会把已加载的值或空值转换成 `Option`，但遇到 `NotLoaded` 会带着缺失访问路径立即失败；`or_if_null(...)` 也只为真正的数据库 `NULL` 提供默认值，不会掩盖漏加载。
 
-当前模型生成的 `E` facade 已覆盖 Asset 的标量、`ContentRepository` 和 `AssetBlob` 前向关系。项目现有手写 Service 对 `select_self_fields()` 后的标量仍采用直接 accessor，尚未把跨关系读取迁移到 `E::`；所以上面的代码展示的是已经生成并验证过的安全访问能力，而不是声称所有业务路径都已完成迁移。后续涉及最小投影和跨关系遍历时，优先使用 E 表达式，可以让“数据为空”和“程序写错了查询”保持清晰边界。这种尽早失败比在很远的业务分支里产生错误制品元数据更容易定位，也更适合 Registry 这类基础设施服务。
+当前实现已经把这套规则落到了主要读取链路，而不再只是示例。Asset、AssetBlob 和 Component 查询使用明确投影；下载、搜索、清理以及各制品生态的读取路径会一次性选择 `AssetBlob` 关系，再在 Service 边界通过 `E` 构造只读模型。这样既消除了逐个 `asset_blob_id` 回查造成的 N+1，也让漏掉关系投影时立即以 `NotLoaded` 暴露。集成测试同时覆盖了“标量已投影可正常读取”“关系未投影必须快速失败”“关系投影后可读取”，以及稳定、互不重叠的生成式分页。写入仍然使用生成的 `update_*`、`audit_as(...)` 和 context-only save；`E` 只负责安全读取，不混入 mutation 路径。
 
 ## 5 秒启动
 

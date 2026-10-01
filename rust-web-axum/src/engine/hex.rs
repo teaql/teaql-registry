@@ -173,14 +173,15 @@ impl HexEngine {
         content_repository_id: u64,
         path: &str,
     ) -> Result<Option<Bytes>> {
-        let Some(asset) = AssetService::find_by_path(ctx, content_repository_id, path).await?
+        let Some(asset) =
+            AssetService::find_by_path_with_blob(ctx, content_repository_id, path).await?
         else {
             return Ok(None);
         };
-        let Some(blob) = AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await? else {
+        let Some(blob) = asset.blob() else {
             return Ok(None);
         };
-        Ok(Some(blobstore.read_blob(&blob.blob_ref()).await?))
+        Ok(Some(blobstore.read_blob(blob.blob_ref()).await?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -298,7 +299,7 @@ impl HexEngine {
                 ctx,
                 blobstore,
                 content_repository.id(),
-                &Self::metadata_path(&component.name(), &component.version_name()),
+                &Self::metadata_path(component.name(), component.version_name()),
             )
             .await?
             else {

@@ -330,8 +330,8 @@ The registry records content checksums and deduplicates blobs. A companion
 path, and expected SHA-256 so bootstrap scripts can select and verify the right
 binary deterministically.
 
-The controlled native-client suite uses these commands and then resolves and
-builds a clean consumer through SwiftPM:
+The controlled native-client suite publishes and consumes fixtures through the
+real ecosystem tools, including a clean SwiftPM resolve and build:
 
 ```bash
 ./scripts/verify_native_clients.sh
@@ -369,7 +369,7 @@ cargo run --release -p teaql-registry
 
 > **Resource Sizing & Guidance**: In-memory mode holds all binary payloads directly in RAM and consumes significantly more memory (estimated **100MB–300MB** for code packages; **1GB–3GB** if storing container images/binaries). Standard **filesystem or local S3 storage is the recommended default** for almost all workflows. Use memory mode specifically when running inside ephemeral stateless containers or when benchmarking ultra-low-latency agent loops.
 
-The registry binary explicitly reserves a **32 MiB stack per Tokio worker** for the generated TeaQL schema/mutation path; this applies in both storage modes. Size high-core deployments with that per-worker virtual-memory budget in mind. The full seven-format integration suite and an isolated nine-crate Cargo publication chain pass without setting `RUST_MIN_STACK`; the underlying large-future stack cost is still a separate optimization target.
+The registry binary explicitly reserves a **32 MiB stack per Tokio worker** for the generated TeaQL schema/mutation path; this applies in both storage modes. Size high-core deployments with that per-worker virtual-memory budget in mind. The full 14-format integration suite and an isolated nine-crate Cargo publication chain pass without setting `RUST_MIN_STACK`; the underlying large-future stack cost is still a separate optimization target.
 
 ```bash
 # Via CLI flag
@@ -388,6 +388,9 @@ export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER="postgres"
 export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD="postgres"
 ./scripts/verify.sh
 
+# Run the same gates and retain versions plus complete logs as evidence
+VERIFICATION_RUN_ID=my-run ./scripts/record_verification.sh
+
 # Individual TUI tests (no dependencies, uses a mock API)
 cargo test -p registry-tui
 ```
@@ -397,6 +400,11 @@ the generated domain library, strict application-owned Clippy lints, the full
 workspace test suite, and patch whitespace. It intentionally requires an
 explicit database configuration so a successful run is retained evidence of
 the environment that was actually tested.
+
+The retained 2026-10-01 baseline reports **95 passed, 0 failed** and a native
+client matrix covering Cargo, Maven, npm, PyPI, Go Modules, NuGet, Swift,
+Docker/OCI, and Raw binaries. See the [verification evidence](evidence/README.md)
+for exact toolchain versions, per-format coverage, raw logs, and test boundaries.
 
 ---
 

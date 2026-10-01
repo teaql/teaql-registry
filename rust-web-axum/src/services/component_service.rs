@@ -2,7 +2,57 @@ use crate::context::RegistryContextExt;
 use crate::services::{AssetService, SaveAuditedExt};
 use anyhow::{anyhow, Result};
 use teaql_core::{Entity, SmartList};
-use teaql_registry_core::{Component, ServiceRuntime, Q};
+use teaql_registry_core::{Component, ServiceRuntime, E, Q};
+
+/// Stable application read model for a deliberately projected Component.
+/// Keeping expression evaluation at this boundary prevents downstream format
+/// handlers from silently reading TeaQL fields that a query stopped loading.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadedComponent {
+    id: u64,
+    namespace: String,
+    name: String,
+    version_name: String,
+    normalized_version: String,
+    kind: String,
+}
+
+impl LoadedComponent {
+    fn from_selected(entity: Component) -> Self {
+        Self {
+            id: E::component(&entity).get_id().unwrap(),
+            namespace: E::component(&entity).get_namespace().unwrap(),
+            name: E::component(&entity).get_name().unwrap(),
+            version_name: E::component(&entity).get_version_name().unwrap(),
+            normalized_version: E::component(&entity).get_normalized_version().unwrap(),
+            kind: E::component(&entity).get_kind().unwrap(),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn version_name(&self) -> &str {
+        &self.version_name
+    }
+
+    pub fn normalized_version(&self) -> &str {
+        &self.normalized_version
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+}
 
 pub struct ComponentService;
 
@@ -37,19 +87,24 @@ impl ComponentService {
         content_repo_id: u64,
         limit: u64,
         offset: u64,
-    ) -> Result<SmartList<Component>> {
-        let rows = Q::components()
-            .select_self_fields()
+    ) -> Result<SmartList<LoadedComponent>> {
+        let rows = Q::components_minimal()
+            .select_namespace()
+            .select_name()
+            .select_version_name()
+            .select_normalized_version()
+            .select_kind()
             .filter_by_content_repository(content_repo_id)
-            .offset(offset, limit)
+            .order_by_id_asc()
             .comment("what: query registry component metadata")
             .purpose("why: resolve package components and their assets")
-            .execute_for_list(ctx)
+            .execute_for_page(ctx, offset, limit)
             .await
             .map_err(|e| anyhow!("Failed to list components: {}", e))?;
 
-        let filtered: Vec<Component> = rows
+        let filtered: Vec<LoadedComponent> = rows
             .into_iter()
+            .map(LoadedComponent::from_selected)
             .filter(|c| {
                 !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted"
             })
@@ -60,9 +115,44 @@ impl ComponentService {
     pub async fn list_by_repository(
         ctx: &ServiceRuntime,
         content_repo_id: u64,
-    ) -> Result<Vec<Component>> {
+    ) -> Result<Vec<LoadedComponent>> {
         let smart_list = Self::list_by_content_repository(ctx, content_repo_id, 1000, 0).await?;
         Ok(smart_list.into_iter().collect())
+    }
+
+    /// Load one deterministic page for an exact package name. This keeps
+    /// format-specific index builders on the same projected read boundary.
+    pub async fn list_by_name(
+        context: &ServiceRuntime,
+        content_repo_id: u64,
+        name: &str,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<LoadedComponent>> {
+        let rows = Q::components_minimal()
+            .select_namespace()
+            .select_name()
+            .select_version_name()
+            .select_normalized_version()
+            .select_kind()
+            .filter_by_content_repository(content_repo_id)
+            .with_name_is(name)
+            .order_by_id_asc()
+            .comment("what: query one package name with an explicit projection")
+            .purpose("why: build a complete package index without full entity reads")
+            .execute_for_page(context, offset, limit)
+            .await
+            .map_err(|error| anyhow!("Failed to list named components: {error}"))?;
+
+        Ok(rows
+            .into_iter()
+            .map(LoadedComponent::from_selected)
+            .filter(|component| {
+                !component.name().is_empty()
+                    && !component.name().starts_with("[DELETED")
+                    && component.kind() != "deleted"
+            })
+            .collect())
     }
 
     /// In pure in-memory mode, evict older versions of the same artifact so that only the latest single version is kept.
@@ -82,12 +172,10 @@ impl ComponentService {
                 && old_comp.name() == name
                 && old_comp.version_name() != current_version
             {
-                let assets = AssetService::list_by_component(ctx, old_comp.id()).await?;
+                let assets = AssetService::list_by_component_with_blobs(ctx, old_comp.id()).await?;
                 for asset in assets {
-                    if let Ok(Some(blob)) =
-                        AssetService::get_asset_blob(ctx, asset.asset_blob_id()).await
-                    {
-                        let _ = blobstore.delete_blob(&blob.blob_ref()).await;
+                    if let Some(blob) = asset.blob() {
+                        let _ = blobstore.delete_blob(blob.blob_ref()).await;
                         let _ = AssetService::delete_asset_blob(ctx, blob.id()).await;
                     }
                     let _ = AssetService::delete(ctx, asset.id()).await;

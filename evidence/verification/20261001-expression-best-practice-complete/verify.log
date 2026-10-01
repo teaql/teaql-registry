@@ -1,0 +1,683 @@
+[1/5] Checking formatting
+[2/5] Checking the generated domain library
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/blob_store_configuration/request.rs:2616:8
+     |
+  45 | impl<R> BlobStoreConfigurationRequest<R> {
+     | ---------------------------------------- method in this implementation
+...
+2616 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `scalar_from_components_as` is never used
+    --> rust-lib-core/lib/src/content_repository/request.rs:1857:8
+     |
+  45 | impl<R> ContentRepositoryRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+1857 |     fn scalar_from_components_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_tenants_as`, `scalar_from_repository_types_as`, `scalar_from_repository_formats_as`, `scalar_from_write_policies_as`, `scalar_from_blob_store_types_as`, and `scalar_from_user_statuses_as` are never used
+    --> rust-lib-core/lib/src/platform/request.rs:1945:8
+     |
+  45 | impl<R> PlatformRequest<R> {
+     | -------------------------- methods in this implementation
+...
+1945 |     fn scalar_from_tenants_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+2012 |     fn scalar_from_repository_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2082 |     fn scalar_from_repository_formats_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2152 |     fn scalar_from_write_policies_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2219 |     fn scalar_from_blob_store_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2289 |     fn scalar_from_user_statuses_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_format/request.rs:2100:8
+     |
+  45 | impl<R> RepositoryFormatRequest<R> {
+     | ---------------------------------- method in this implementation
+...
+2100 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_type/request.rs:1860:8
+     |
+  45 | impl<R> RepositoryTypeRequest<R> {
+     | -------------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_role_privileges_as` is never used
+    --> rust-lib-core/lib/src/security_privilege/request.rs:2806:8
+     |
+  45 | impl<R> SecurityPrivilegeRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+2806 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_security_user_roles_as` and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/security_role/request.rs:2253:8
+     |
+  45 | impl<R> SecurityRoleRequest<R> {
+     | ------------------------------ methods in this implementation
+...
+2253 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2326 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_user_roles_as` is never used
+    --> rust-lib-core/lib/src/security_user/request.rs:2886:8
+     |
+  45 | impl<R> SecurityUserRequest<R> {
+     | ------------------------------ method in this implementation
+...
+2886 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_repository_configurations_as`, `scalar_from_security_users_as`, `scalar_from_security_roles_as`, `scalar_from_security_privileges_as`, `scalar_from_security_user_roles_as`, and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/tenant/request.rs:3117:8
+     |
+  45 | impl<R> TenantRequest<R> {
+     | ------------------------ methods in this implementation
+...
+3117 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3420 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3487 |     fn scalar_from_security_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3554 |     fn scalar_from_security_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3624 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3697 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_users_as` is never used
+    --> rust-lib-core/lib/src/user_status/request.rs:1839:8
+     |
+  45 | impl<R> UserStatusRequest<R> {
+     | ---------------------------- method in this implementation
+...
+1839 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/write_policy/request.rs:1860:8
+     |
+  45 | impl<R> WritePolicyRequest<R> {
+     | ----------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `teaql-registry-service-core` (lib test) generated 11 warnings
+warning: `teaql-registry-service-core` (lib) generated 11 warnings (11 duplicates)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+[3/5] Linting application-owned code
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/blob_store_configuration/request.rs:2616:8
+     |
+  45 | impl<R> BlobStoreConfigurationRequest<R> {
+     | ---------------------------------------- method in this implementation
+...
+2616 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `scalar_from_components_as` is never used
+    --> rust-lib-core/lib/src/content_repository/request.rs:1857:8
+     |
+  45 | impl<R> ContentRepositoryRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+1857 |     fn scalar_from_components_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_tenants_as`, `scalar_from_repository_types_as`, `scalar_from_repository_formats_as`, `scalar_from_write_policies_as`, `scalar_from_blob_store_types_as`, and `scalar_from_user_statuses_as` are never used
+    --> rust-lib-core/lib/src/platform/request.rs:1945:8
+     |
+  45 | impl<R> PlatformRequest<R> {
+     | -------------------------- methods in this implementation
+...
+1945 |     fn scalar_from_tenants_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+2012 |     fn scalar_from_repository_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2082 |     fn scalar_from_repository_formats_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2152 |     fn scalar_from_write_policies_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2219 |     fn scalar_from_blob_store_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2289 |     fn scalar_from_user_statuses_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_format/request.rs:2100:8
+     |
+  45 | impl<R> RepositoryFormatRequest<R> {
+     | ---------------------------------- method in this implementation
+...
+2100 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_type/request.rs:1860:8
+     |
+  45 | impl<R> RepositoryTypeRequest<R> {
+     | -------------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_role_privileges_as` is never used
+    --> rust-lib-core/lib/src/security_privilege/request.rs:2806:8
+     |
+  45 | impl<R> SecurityPrivilegeRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+2806 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_security_user_roles_as` and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/security_role/request.rs:2253:8
+     |
+  45 | impl<R> SecurityRoleRequest<R> {
+     | ------------------------------ methods in this implementation
+...
+2253 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2326 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_user_roles_as` is never used
+    --> rust-lib-core/lib/src/security_user/request.rs:2886:8
+     |
+  45 | impl<R> SecurityUserRequest<R> {
+     | ------------------------------ method in this implementation
+...
+2886 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_repository_configurations_as`, `scalar_from_security_users_as`, `scalar_from_security_roles_as`, `scalar_from_security_privileges_as`, `scalar_from_security_user_roles_as`, and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/tenant/request.rs:3117:8
+     |
+  45 | impl<R> TenantRequest<R> {
+     | ------------------------ methods in this implementation
+...
+3117 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3420 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3487 |     fn scalar_from_security_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3554 |     fn scalar_from_security_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3624 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3697 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_users_as` is never used
+    --> rust-lib-core/lib/src/user_status/request.rs:1839:8
+     |
+  45 | impl<R> UserStatusRequest<R> {
+     | ---------------------------- method in this implementation
+...
+1839 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/write_policy/request.rs:1860:8
+     |
+  45 | impl<R> WritePolicyRequest<R> {
+     | ----------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `teaql-registry-service-core` (lib) generated 11 warnings
+    Checking teaql-registry v0.1.0 (/home/philip/githome/teaql-registry/rust-web-axum)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.03s
+[4/5] Running the complete test suite serially
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/blob_store_configuration/request.rs:2616:8
+     |
+  45 | impl<R> BlobStoreConfigurationRequest<R> {
+     | ---------------------------------------- method in this implementation
+...
+2616 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `scalar_from_components_as` is never used
+    --> rust-lib-core/lib/src/content_repository/request.rs:1857:8
+     |
+  45 | impl<R> ContentRepositoryRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+1857 |     fn scalar_from_components_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_tenants_as`, `scalar_from_repository_types_as`, `scalar_from_repository_formats_as`, `scalar_from_write_policies_as`, `scalar_from_blob_store_types_as`, and `scalar_from_user_statuses_as` are never used
+    --> rust-lib-core/lib/src/platform/request.rs:1945:8
+     |
+  45 | impl<R> PlatformRequest<R> {
+     | -------------------------- methods in this implementation
+...
+1945 |     fn scalar_from_tenants_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+2012 |     fn scalar_from_repository_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2082 |     fn scalar_from_repository_formats_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2152 |     fn scalar_from_write_policies_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2219 |     fn scalar_from_blob_store_types_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2289 |     fn scalar_from_user_statuses_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_format/request.rs:2100:8
+     |
+  45 | impl<R> RepositoryFormatRequest<R> {
+     | ---------------------------------- method in this implementation
+...
+2100 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/repository_type/request.rs:1860:8
+     |
+  45 | impl<R> RepositoryTypeRequest<R> {
+     | -------------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_role_privileges_as` is never used
+    --> rust-lib-core/lib/src/security_privilege/request.rs:2806:8
+     |
+  45 | impl<R> SecurityPrivilegeRequest<R> {
+     | ----------------------------------- method in this implementation
+...
+2806 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_security_user_roles_as` and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/security_role/request.rs:2253:8
+     |
+  45 | impl<R> SecurityRoleRequest<R> {
+     | ------------------------------ methods in this implementation
+...
+2253 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2326 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_user_roles_as` is never used
+    --> rust-lib-core/lib/src/security_user/request.rs:2886:8
+     |
+  45 | impl<R> SecurityUserRequest<R> {
+     | ------------------------------ method in this implementation
+...
+2886 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `scalar_from_repository_configurations_as`, `scalar_from_security_users_as`, `scalar_from_security_roles_as`, `scalar_from_security_privileges_as`, `scalar_from_security_user_roles_as`, and `scalar_from_security_role_privileges_as` are never used
+    --> rust-lib-core/lib/src/tenant/request.rs:3117:8
+     |
+  45 | impl<R> TenantRequest<R> {
+     | ------------------------ methods in this implementation
+...
+3117 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3420 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3487 |     fn scalar_from_security_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3554 |     fn scalar_from_security_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3624 |     fn scalar_from_security_user_roles_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3697 |     fn scalar_from_security_role_privileges_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_security_users_as` is never used
+    --> rust-lib-core/lib/src/user_status/request.rs:1839:8
+     |
+  45 | impl<R> UserStatusRequest<R> {
+     | ---------------------------- method in this implementation
+...
+1839 |     fn scalar_from_security_users_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `scalar_from_repository_configurations_as` is never used
+    --> rust-lib-core/lib/src/write_policy/request.rs:1860:8
+     |
+  45 | impl<R> WritePolicyRequest<R> {
+     | ----------------------------- method in this implementation
+...
+1860 |     fn scalar_from_repository_configurations_as(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `teaql-registry-service-core` (lib) generated 11 warnings
+   Compiling teaql-registry v0.1.0 (/home/philip/githome/teaql-registry/rust-web-axum)
+warning: `teaql-registry-service-core` (lib test) generated 11 warnings (11 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 42.04s
+     Running unittests src/main.rs (/home/philip/shared-cargo-target/debug/deps/registry_tui-b038db002c8db377)
+
+running 11 tests
+test app::tests::test_active_cursor_navigation ... ok
+test app::tests::test_command_history ... ok
+test app::tests::test_command_repos ... ok
+test app::tests::test_command_search ... ok
+test app::tests::test_create_token ... ok
+test app::tests::test_gc_failure ... ok
+test app::tests::test_gc_success ... ok
+test app::tests::test_initialize_creates_blocks ... ok
+test app::tests::test_input_editing ... ok
+test app::tests::test_quit_commands ... ok
+test app::tests::test_unknown_command ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/philip/shared-cargo-target/debug/deps/teaql_registry-c77130164aa0106f)
+
+running 13 tests
+test format::cargo::tests::malformed_publish_features_do_not_become_an_empty_valid_index ... ok
+test format::cargo::tests::publish_dependencies_keep_registry_rename_features_and_kinds ... ok
+test format::composer::tests::reads_manifest_from_wrapped_zip ... ok
+test format::composer::tests::validates_names_and_versions ... ok
+test format::conan::tests::validates_coordinates_and_paths ... ok
+test format::dart::tests::extracts_pubspec_from_package ... ok
+test format::dart::tests::validates_package_names ... ok
+test format::hex::tests::parses_and_validates_hex_package ... ok
+test format::nuget::tests::reads_identity_from_nuspec_manifest ... ok
+test format::rubygems::tests::extracts_name_version_and_platform ... ok
+test format::swift::tests::extracts_default_and_versioned_manifests ... ok
+test format::swift::tests::rejects_archive_without_manifest ... ok
+test format::swift::tests::rejects_duplicate_root_manifest ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (/home/philip/shared-cargo-target/debug/deps/teaql_registry-0a754c2d04c2e8ac)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/blobstore_test.rs (/home/philip/shared-cargo-target/debug/deps/blobstore_test-70702337a98ec219)
+
+running 9 tests
+test test_file_blobstore_contract ... ok
+test test_file_blobstore_streaming_contract ... ok
+test test_memory_blobstore_contract ... ok
+test test_s3_blobstore_binary_payload ... ok
+test test_s3_blobstore_contract ... ok
+test test_s3_blobstore_create_read_and_checksums ... ok
+test test_s3_blobstore_delete_and_non_existent ... ok
+test test_s3_blobstore_empty_blob ... ok
+test test_s3_blobstore_streaming_contract ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/cleanup_test.rs (/home/philip/shared-cargo-target/debug/deps/cleanup_test-b1c3cf8a7bceb099)
+
+running 1 test
+test test_retention_and_cleanup_policy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
+
+     Running tests/docker_format_test.rs (/home/philip/shared-cargo-target/debug/deps/docker_format_test-b6a8eff98eede4f3)
+
+running 3 tests
+test test_compute_sha256_digest_and_validation ... ok
+test test_docker_manifest_serde ... ok
+test test_parse_docker_paths ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/docker_registry_test.rs (/home/philip/shared-cargo-target/debug/deps/docker_registry_test-a9619532652609c3)
+
+running 2 tests
+test test_docker_blob_and_manifest_lifecycle ... ok
+test test_docker_v2_ping ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.78s
+
+     Running tests/engine_test.rs (/home/philip/shared-cargo-target/debug/deps/engine_test-9c85e2d0dbe06e54)
+
+running 3 tests
+test test_group_engine_routing ... ok
+test test_hosted_engine_missing_asset ... ok
+test test_hosted_engine_write_policies ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.14s
+
+     Running tests/gc_test.rs (/home/philip/shared-cargo-target/debug/deps/gc_test-983c14ab34fb129c)
+
+running 1 test
+test test_blobstore_garbage_collection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+     Running tests/integration_test.rs (/home/philip/shared-cargo-target/debug/deps/integration_test-6738e9098c9ddcea)
+
+running 4 tests
+test test_artifact_upload_download_and_group_routing ... ok
+test test_debug_component_query ... ok
+test test_rest_repositories_and_security ... ok
+test test_rest_status_endpoints ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.20s
+
+     Running tests/maven_format_test.rs (/home/philip/shared-cargo-target/debug/deps/maven_format_test-28a02eed3b7ff85a)
+
+running 6 tests
+test test_generate_maven_metadata_xml ... ok
+test test_parse_invalid_maven_paths ... ok
+test test_parse_maven_metadata ... ok
+test test_parse_snapshot_artifact ... ok
+test test_parse_standard_pom_and_sources ... ok
+test test_parse_standard_release_jar ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/memory_mode_test.rs (/home/philip/shared-cargo-target/debug/deps/memory_mode_test-67eac0d3b89af13e)
+
+running 1 test
+test test_pure_memory_mode_single_latest_version_retention ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests/metrics_test.rs (/home/philip/shared-cargo-target/debug/deps/metrics_test-dce0417245eaaf5d)
+
+running 1 test
+test test_prometheus_metrics_endpoint ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
+
+     Running tests/multiformat_test.rs (/home/philip/shared-cargo-target/debug/deps/multiformat_test-5f37be259bf52e80)
+
+running 13 tests
+test test_cargo_registry_lifecycle ... ok
+test test_composer_registry_lifecycle ... ok
+test test_conan_v2_registry_lifecycle ... ok
+test test_dart_pub_registry_lifecycle ... ok
+test test_gomod_registry_lifecycle ... ok
+test test_hex_registry_v2_lifecycle_and_signature ... ok
+test test_npm_registry_lifecycle ... ok
+test test_nuget_native_multipart_upload_strips_envelope ... ok
+test test_nuget_registry_lifecycle ... ok
+test test_pypi_registry_lifecycle ... ok
+test test_rubygems_registry_lifecycle ... ok
+test test_scoped_npm_registry_lifecycle ... ok
+test test_swift_package_registry_lifecycle ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.73s
+
+     Running tests/multitenancy_test.rs (/home/philip/shared-cargo-target/debug/deps/multitenancy_test-3cecd3e55c560ba6)
+
+running 2 tests
+test test_tenant_creation_and_provisioning_lifecycle ... ok
+test test_user_context_tenant_isolation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.49s
+
+     Running tests/proxy_cache_test.rs (/home/philip/shared-cargo-target/debug/deps/proxy_cache_test-9076eb7b12630852)
+
+running 1 test
+test test_proxy_negative_cache_lifecycle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/raw_format_test.rs (/home/philip/shared-cargo-target/debug/deps/raw_format_test-9aad8e461569c050)
+
+running 2 tests
+test test_sanitize_raw_path_leading_slashes ... ok
+test test_sanitize_raw_path_nested ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/rest_api_test.rs (/home/philip/shared-cargo-target/debug/deps/rest_api_test-905adf7ec78be5e5)
+
+running 5 tests
+test test_rest_blobstores_endpoints ... ok
+test test_rest_components_and_assets ... ok
+test test_rest_repositories_endpoints ... ok
+test test_rest_security_endpoints ... ok
+test test_rest_status_endpoints ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.89s
+
+     Running tests/search_test.rs (/home/philip/shared-cargo-target/debug/deps/search_test-60afca21bbd13135)
+
+running 1 test
+test test_search_components_and_assets ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+     Running tests/security_test.rs (/home/philip/shared-cargo-target/debug/deps/security_test-777c87cea8454002)
+
+running 8 tests
+test test_parse_basic_auth_invalid ... ok
+test test_parse_basic_auth_valid ... ok
+test test_password_empty ... ok
+test test_password_hash_and_verify ... ok
+test test_password_legacy_sha512_migration_compatibility ... ok
+test test_rbac_format_and_action_scoped_privileges ... ok
+test test_rbac_super_admin_privilege ... ok
+test test_rbac_wildcard_all_repositories ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.10s
+
+     Running tests/services_unit_test.rs (/home/philip/shared-cargo-target/debug/deps/services_unit_test-2251707688e1c0d1)
+
+running 4 tests
+test test_blob_store_service ... ok
+test test_component_and_asset_service ... ok
+test test_repository_service ... ok
+test test_security_service ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.07s
+
+     Running tests/teaql_expression_test.rs (/home/philip/shared-cargo-target/debug/deps/teaql_expression_test-8960300c5ecb13e1)
+
+running 2 tests
+test e_expression_distinguishes_selected_values_from_missing_relations ... ok
+test generated_component_pages_are_stable_and_non_overlapping ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.60s
+
+     Running tests/token_test.rs (/home/philip/shared-cargo-target/debug/deps/token_test-a0bbc1cbb560ba0b)
+
+running 2 tests
+test test_personal_access_token_lifecycle ... ok
+test zero_day_token_means_no_expiration_and_survives_a_new_runtime ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.14s
+
+     Running tests/ui_test.rs (/home/philip/shared-cargo-target/debug/deps/ui_test-1dec32804ec765f4)
+
+running 1 test
+test test_embedded_ui_console ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+     Running tests/webhook_test.rs (/home/philip/shared-cargo-target/debug/deps/webhook_test-df380196ec98839e)
+
+running 1 test
+test test_webhook_subscription_lifecycle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/philip/shared-cargo-target/debug/deps/teaql_registry_service_core-8a6daf7592d1922c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests teaql_registry
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests teaql_registry_service_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[5/5] Checking patch hygiene
+TeaQL Registry verification passed

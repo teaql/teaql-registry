@@ -1,0 +1,9 @@
+run_id=20261001-workspace
+recorded_at_utc=2026-10-01T01:31:49Z
+git_commit=59be352985af9c61c4d516324080c6698b139311
+git_dirty=false
+platform=Linux 6.8.0-136-generic #136~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul  3 16:29:11 UTC  x86_64 GNU/Linux
+rustc=rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo=cargo 1.97.1 (c980f4866 2026-06-30)
+cargo_teaql=teaql 2.0.14
+postgres_server=PostgreSQL 16.15; postgres:16-alpine@sha256:75f5a96988cdf694a215073c3e9c001b706b371e2f94df3967f2efdec2787f6b

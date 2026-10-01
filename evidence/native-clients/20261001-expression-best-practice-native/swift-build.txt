@@ -1,0 +1,12 @@
+Building for debugging...
+[0/7] Write sources
+[2/7] Write swift-version-7C861F943E7F58D9.txt
+[4/9] Compiling TeaQLNativeProbe Probe.swift
+[5/9] Emitting module TeaQLNativeProbe
+[6/10] Wrapping AST for TeaQLNativeProbe for debugging
+[8/12] Emitting module Consumer
+[9/12] Compiling Consumer main.swift
+[10/13] Wrapping AST for Consumer for debugging
+[11/13] Write Objects.LinkFileList
+[12/13] Linking Consumer
+Build complete! (3.58s)

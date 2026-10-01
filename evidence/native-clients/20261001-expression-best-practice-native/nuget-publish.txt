@@ -1,0 +1,6 @@
+warn : You are running the 'push' operation with an 'HTTP' source, 'http://127.0.0.1:18085/repository/nuget-hosted/v3/index.json'. Non-HTTPS access will be removed in a future version. Consider migrating to an 'HTTPS' source.
+Pushing TeaQL.Native.Probe.20261001-expression-best-practice-native.0.0.1.nupkg to 'http://127.0.0.1:18085/repository/nuget-hosted/v3/package'...
+warn : You are running the 'push' operation with an 'HTTP' source, 'http://127.0.0.1:18085/repository/nuget-hosted/v3/package/'. Non-HTTPS access will be removed in a future version. Consider migrating to an 'HTTPS' source.
+  PUT http://127.0.0.1:18085/repository/nuget-hosted/v3/package/
+  Created http://127.0.0.1:18085/repository/nuget-hosted/v3/package/ 36ms
+Your package was pushed.

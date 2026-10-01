@@ -1,0 +1,21 @@
+[INFO] Scanning for projects...
+[INFO]
+[INFO] ------------------< org.apache.maven:standalone-pom >-------------------
+[INFO] Building Maven Stub Project (No POM) 1
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO]
+[INFO] --- deploy:3.1.4:deploy-file (default-cli) @ standalone-pom ---
+[INFO] pom.xml not found in native-probe-20261001-expression-best-practice-native.jar
+[INFO] Uploading to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/0.0.1/native-probe-20261001-expression-best-practice-native-0.0.1.jar
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/0.0.1/native-probe-20261001-expression-best-practice-native-0.0.1.jar (492 B at 236 B/s)
+[INFO] Uploading to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/0.0.1/native-probe-20261001-expression-best-practice-native-0.0.1.pom
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/0.0.1/native-probe-20261001-expression-best-practice-native-0.0.1.pom (441 B at 228 B/s)
+[INFO] Downloading from teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/maven-metadata.xml
+[INFO] Uploading to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/maven-metadata.xml
+[INFO] Uploaded to teaql-native: http://127.0.0.1:18085/repository/maven-releases/io/teaql/probe/native-probe-20261001-expression-best-practice-native/maven-metadata.xml (347 B at 171 B/s)
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.338 s
+[INFO] Finished at: 2026-10-01T10:02:28+08:00
+[INFO] ------------------------------------------------------------------------

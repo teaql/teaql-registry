@@ -19,10 +19,9 @@ pub struct BlobStoreGcService;
 impl BlobStoreGcService {
     pub async fn run_gc(ctx: &ServiceRuntime, blobstore: &dyn BlobStore) -> Result<GcReport> {
         let all_blobs = AssetService::list_all_blobs(ctx).await?;
-        let all_assets = AssetService::list_all_assets(ctx).await?;
+        let referenced_asset_blob_ids = AssetService::list_all_referenced_blob_ids(ctx).await?;
 
-        let referenced_blob_ids: HashSet<u64> =
-            all_assets.into_iter().map(|a| a.asset_blob_id()).collect();
+        let referenced_blob_ids: HashSet<u64> = referenced_asset_blob_ids.into_iter().collect();
 
         let mut report = GcReport {
             scanned_blobs_count: all_blobs.len(),
@@ -36,7 +35,7 @@ impl BlobStoreGcService {
                 report.orphaned_blobs_deleted += 1;
 
                 // 1. Delete physical object in BlobStore
-                let _ = blobstore.delete_blob(&blob.blob_ref()).await;
+                let _ = blobstore.delete_blob(blob.blob_ref()).await;
 
                 // 2. Delete database record
                 let _ = AssetService::delete_asset_blob(ctx, blob.id()).await;

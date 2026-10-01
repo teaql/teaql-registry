@@ -57,4 +57,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test -- --test-threads=1
+        shell: bash
+        run: |
+          mkdir -p ci-evidence
+          {
+            echo "git_commit=${GITHUB_SHA}"
+            echo "recorded_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "rustc=$(rustc --version)"
+            echo "cargo=$(cargo --version)"
+            echo "postgres_image=postgres:16-alpine"
+          } > ci-evidence/environment.txt
+          set -o pipefail
+          cargo test --workspace -- --test-threads=1 2>&1 | tee ci-evidence/test-output.log
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: warn

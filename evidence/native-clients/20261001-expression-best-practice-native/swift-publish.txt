@@ -1,0 +1,1 @@
+teaql.nativeprobe20261001-expression-best-practice-native version 0.0.1 was successfully published to http://127.0.0.1:18085/repository/swift-hosted/swift and is available at 'http://127.0.0.1:18085/repository/swift-hosted/swift/teaql/nativeprobe20261001-expression-best-practice-native/0.0.1'

@@ -1,0 +1,6 @@
+Computing version for teaql.nativeprobe20261001-expression-best-practice-native
+Computed teaql.nativeprobe20261001-expression-best-practice-native at 0.0.1 (0.23s)
+Fetching teaql.nativeprobe20261001-expression-best-practice-native
+[1621/1621] Fetching teaql.nativeprobe20261001-expression-best-practice-native
+warning: 'teaql.nativeprobe20261001-expression-best-practice-native': teaql.nativeprobe20261001-expression-best-practice-native version 0.0.1 source archive from http://127.0.0.1:18085/repository/swift-hosted/swift is not signed
+Fetched teaql.nativeprobe20261001-expression-best-practice-native from cache (0.03s)

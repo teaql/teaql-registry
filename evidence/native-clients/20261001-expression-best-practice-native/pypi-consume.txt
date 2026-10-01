@@ -1,0 +1,5 @@
+Looking in indexes: http://admin:****@127.0.0.1:18085/repository/pypi-hosted/simple/
+Collecting teaql_native_probe_20261001-expression-best-practice-native==0.0.1
+  Downloading teaql_native_probe_20261001_expression_best_practice_native-0.0.1-py3-none-any.whl (1.8 kB)
+Installing collected packages: teaql_native_probe_20261001-expression-best-practice-native
+Successfully installed teaql_native_probe_20261001-expression-best-practice-native-0.0.1

@@ -1,0 +1,10 @@
+    Updating `teaql` index
+    Updating crates.io index
+     Locking 8 packages to latest compatible versions
+ Downloading crates ...
+  Downloaded teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (registry `teaql`)
+    Checking serde_core v1.0.229
+    Checking serde v1.0.229
+    Checking teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (registry `teaql`)
+    Checking teaql-native-consumer-20261001-expression-best-practice-native v0.0.1 (/tmp/teaql-registry-native.sID1KP/cargo/consumer)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.06s

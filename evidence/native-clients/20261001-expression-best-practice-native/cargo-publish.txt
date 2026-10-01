@@ -1,0 +1,27 @@
+    Updating `teaql` index
+   Packaging teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (/tmp/teaql-registry-native.sID1KP/cargo/package)
+    Updating crates.io index
+    Packaged 4 files, 3.1KiB (1.4KiB compressed)
+   Verifying teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (/tmp/teaql-registry-native.sID1KP/cargo/package)
+ Downloading crates ...
+  Downloaded quote v1.0.47
+  Downloaded unicode-ident v1.0.26
+  Downloaded serde_derive v1.0.229
+  Downloaded proc-macro2 v1.0.107
+  Downloaded serde_core v1.0.229
+  Downloaded serde v1.0.229
+  Downloaded syn v3.0.6
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling syn v3.0.6
+   Compiling serde_derive v1.0.229
+   Compiling teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (/home/philip/shared-cargo-target/package/teaql-native-probe-20261001-expression-best-practice-native-0.0.1)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.25s
+   Uploading teaql-native-probe-20261001-expression-best-practice-native v0.0.1 (/tmp/teaql-registry-native.sID1KP/cargo/package)
+    Uploaded teaql-native-probe-20261001-expression-best-practice-native v0.0.1 to registry `teaql`
+note: waiting for teaql-native-probe-20261001-expression-best-practice-native v0.0.1 to be available at registry `teaql`
+help: you may press ctrl-c to skip waiting; the crate should be available shortly
+   Published teaql-native-probe-20261001-expression-best-practice-native v0.0.1 at registry `teaql`

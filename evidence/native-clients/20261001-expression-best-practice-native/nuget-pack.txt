@@ -1,0 +1,6 @@
+MSBuild version 17.8.49+7806cbf7b for .NET
+  Determining projects to restore...
+  Restored /tmp/teaql-registry-native.sID1KP/nuget/package/TeaQL.Native.Probe.20261001-expression-best-practice-native.csproj (in 980 ms).
+  TeaQL.Native.Probe.20261001-expression-best-practice-native -> /tmp/teaql-registry-native.sID1KP/nuget/package/bin/Release/net8.0/TeaQL.Native.Probe.20261001-expression-best-practice-native.dll
+  The package TeaQL.Native.Probe.20261001-expression-best-practice-native.0.0.1 is missing a readme. Go to https://aka.ms/nuget/authoring-best-practices/readme to learn why package readmes are important.
+  Successfully created package '/tmp/teaql-registry-native.sID1KP/nuget/dist/TeaQL.Native.Probe.20261001-expression-best-practice-native.0.0.1.nupkg'.
