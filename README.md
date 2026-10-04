@@ -96,6 +96,7 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - Cargo preflights both archive and sparse-index paths and validates metadata identity before writing. npm validates all attachments before any publication write; it does not guess a missing version.
   - The check-to-write guard is shared across request contexts **inside one Registry process**. It is not a distributed lock or a crash-atomic multi-record transaction; multiple writing instances require a database-backed reservation/uniqueness boundary before immutability can be claimed.
   - Regression: `cargo test -p teaql-registry --test publication_policy_test -- --test-threads=1` with an isolated PostgreSQL configured through the documented database environment variables. The tests cover HTTP 403/409, byte preservation, no blob writes on denial, concurrent publishers, and legitimate multi-file publication.
+  - [Recorded full verification](evidence/verification/registry-publication-fix-persistent-20261004-repeat/summary.md): 113 tests pass twice on one retained PostgreSQL database, with formatting and strict application Clippy. Multiformat test blobs persist alongside their metadata; failure logs from the earlier volatile-storage fixture are retained, not overwritten.
 - **CI/CD Security & Integration**:
   - Database-persisted Personal Access Tokens (`tql_pat_*`) with hashed secrets, scope enforcement, revocation, expiry, and HMAC-signed webhook event delivery.
   - Randomized admin credentials on first startup (no default passwords shipped).
