@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use teaql_registry::{
     api::{build_app, AppState},
-    blobstore::{BlobStore, MemoryBlobStore},
+    blobstore::{BlobStore, FileBlobStore},
     format::npm::{NpmAttachment, NpmDist, NpmPackageDocument, NpmVersionDetail},
     services::{BlobStoreService, RepositoryService, TenantService},
 };
@@ -19,6 +19,14 @@ use tower::ServiceExt;
 
 async fn setup_multiformat_test_app() -> axum::Router {
     let config = common::runtime_config();
+    // Metadata survives process exit, so its blobs must have the same lifetime.
+    // A fresh MemoryBlobStore makes a second same-DB run lose previous Hex/Gem
+    // archives when registry indexes enumerate all published packages.
+    // Hash the DB identity to isolate test databases without exposing its URL.
+    let blob_root = std::env::temp_dir().join(format!(
+        "teaql-registry-multiformat-{}",
+        hex::encode(sha2::Sha256::digest(config.database_url.as_bytes()))
+    ));
     let runtime = Arc::new(
         service_runtime(config)
             .await
@@ -41,7 +49,7 @@ async fn setup_multiformat_test_app() -> axum::Router {
         .unwrap();
     }
 
-    let blobstore: Arc<dyn BlobStore> = Arc::new(MemoryBlobStore::new("multi-blobs"));
+    let blobstore: Arc<dyn BlobStore> = Arc::new(FileBlobStore::new(blob_root, "multi-blobs"));
     blobstore.init().await.expect("Blobstore init error");
 
     let bs_list = BlobStoreService::list(&runtime).await.unwrap();
