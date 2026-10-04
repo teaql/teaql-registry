@@ -2,6 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
+use super::publication::PublicationGuard;
 use crate::blobstore::BlobStore;
 use crate::services::{AssetService, ComponentService, RepositoryService};
 
@@ -17,8 +18,10 @@ impl GoModEngine {
         ext: &str,
         data: &[u8],
     ) -> Result<()> {
-        let content_repo =
-            RepositoryService::ensure_content_repository(ctx, repo.id(), "gomod").await?;
+        let path = format!("/{module}/@v/{version}.{ext}");
+        let publication =
+            PublicationGuard::begin(ctx, repo, "gomod", std::slice::from_ref(&path)).await?;
+        let content_repo = &publication.content_repository;
         let blob_info = blobstore.create_blob(data).await?;
 
         let ct = match ext {
@@ -44,7 +47,6 @@ impl GoModEngine {
             ComponentService::find_or_create(ctx, content_repo.id(), "", module, version, ext)
                 .await?;
 
-        let path = format!("/{}/@v/{}.{}", module, version, ext);
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),

@@ -2,6 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
+use super::publication::PublicationGuard;
 use crate::blobstore::BlobStore;
 use crate::format::nuget::{create_nuget_service_index, NuGetPackageVersions, NuGetServiceIndex};
 use crate::services::{AssetService, ComponentService, RepositoryService};
@@ -21,12 +22,13 @@ impl NuGetEngine {
         version: &str,
         nupkg_data: &[u8],
     ) -> Result<()> {
-        let content_repo =
-            RepositoryService::ensure_content_repository(ctx, repo.id(), "nuget").await?;
-        let blob_info = blobstore.create_blob(nupkg_data).await?;
-
         let id_lower = id.to_lowercase();
         let ver_lower = version.to_lowercase();
+        let path = format!("/v3/flatcontainer/{id_lower}/{ver_lower}/{id_lower}.{ver_lower}.nupkg");
+        let publication =
+            PublicationGuard::begin(ctx, repo, "nuget", std::slice::from_ref(&path)).await?;
+        let content_repo = &publication.content_repository;
+        let blob_info = blobstore.create_blob(nupkg_data).await?;
 
         let asset_blob = AssetService::create_asset_blob(
             ctx,
@@ -50,10 +52,6 @@ impl NuGetEngine {
         )
         .await?;
 
-        let path = format!(
-            "/v3/flatcontainer/{}/{}/{}.{}.nupkg",
-            id_lower, ver_lower, id_lower, ver_lower
-        );
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),

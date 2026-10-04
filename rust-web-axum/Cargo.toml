@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 teaql_registry_core = { package = "teaql-registry-service-core", path = "../rust-lib-core/lib" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }
 tokio-util = { version = "0.7", features = ["io"] }
 teaql-core = "5.0.5"
 teaql-runtime = "5.0.5"

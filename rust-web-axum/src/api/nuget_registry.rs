@@ -312,7 +312,11 @@ pub async fn handle_nuget_push(
                 &e.to_string(),
             )
             .await;
-            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+            (
+                crate::engine::publication::publication_error_status(&e),
+                e.to_string(),
+            )
+                .into_response()
         }
     }
 }

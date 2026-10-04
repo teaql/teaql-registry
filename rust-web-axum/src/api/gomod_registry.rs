@@ -337,7 +337,11 @@ pub async fn handle_gomod_put(
                 &e.to_string(),
             )
             .await;
-            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+            (
+                crate::engine::publication::publication_error_status(&e),
+                e.to_string(),
+            )
+                .into_response()
         }
     }
 }

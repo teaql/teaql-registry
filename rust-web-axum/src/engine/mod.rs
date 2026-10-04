@@ -13,6 +13,7 @@ pub mod npm;
 pub mod nuget;
 pub mod proxy;
 pub mod proxy_cache;
+pub mod publication;
 pub mod pypi;
 pub mod registry;
 pub mod rubygems;

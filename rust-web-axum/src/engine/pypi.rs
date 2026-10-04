@@ -2,6 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
+use super::publication::PublicationGuard;
 use crate::blobstore::{BlobInfo, BlobStore, ByteStream};
 use crate::format::pypi::{
     generate_pypi_simple_package_html, generate_pypi_simple_root_html, PyPiFileEntry,
@@ -42,21 +43,30 @@ impl PyPiEngine {
         filename: &str,
         stream: ByteStream,
     ) -> Result<()> {
+        let path = format!("/packages/{filename}");
+        let publication = PublicationGuard::begin(ctx, repo, "pypi", &[path]).await?;
         let blob_info = blobstore.create_blob_from_stream(stream).await?;
-        Self::register_uploaded_file(ctx, repo, project_name, version, filename, blob_info).await
+        Self::register_uploaded_file(
+            ctx,
+            repo,
+            publication.content_repository.id(),
+            project_name,
+            version,
+            filename,
+            blob_info,
+        )
+        .await
     }
 
     async fn register_uploaded_file(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
+        content_repository_id: u64,
         project_name: &str,
         version: &str,
         filename: &str,
         blob_info: BlobInfo,
     ) -> Result<()> {
-        let content_repo =
-            RepositoryService::ensure_content_repository(ctx, repo.id(), "pypi").await?;
-
         let ct = if filename.ends_with(".whl") {
             "application/x-wheel+zip"
         } else {
@@ -77,7 +87,7 @@ impl PyPiEngine {
 
         let comp = ComponentService::find_or_create(
             ctx,
-            content_repo.id(),
+            content_repository_id,
             "",
             project_name,
             version,
@@ -92,7 +102,7 @@ impl PyPiEngine {
         let path = format!("/packages/{}", filename);
         AssetService::upsert_asset(
             ctx,
-            content_repo.id(),
+            content_repository_id,
             Some(comp.id()),
             asset_blob.id(),
             &path,

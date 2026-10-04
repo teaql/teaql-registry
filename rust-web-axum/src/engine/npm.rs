@@ -4,6 +4,7 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
+use super::publication::PublicationGuard;
 use crate::blobstore::BlobStore;
 use crate::format::npm::{NpmDist, NpmPackageDocument, NpmVersionDetail};
 use crate::services::{AssetService, ComponentService, RepositoryService};
@@ -17,14 +18,32 @@ impl NpmEngine {
         blobstore: &dyn BlobStore,
         doc: &NpmPackageDocument,
     ) -> Result<()> {
-        let content_repo =
-            RepositoryService::ensure_content_repository(ctx, repo.id(), "npm").await?;
-
+        // Preflight the entire document, rather than writing one attachment
+        // before discovering another is invalid or already published.
+        let mut prepared = Vec::new();
+        let mut paths = Vec::new();
+        let (namespace, name) = if doc.name.starts_with('@') {
+            doc.name.split_once('/').unwrap_or(("", &doc.name))
+        } else {
+            ("", doc.name.as_str())
+        };
         for (filename, attachment) in &doc.attachments {
+            let version = attachment_version(doc, filename)?;
             let data = base64::engine::general_purpose::STANDARD
                 .decode(&attachment.data)
                 .map_err(|e| anyhow!("Invalid base64 attachment data: {}", e))?;
+            let path = format!("/{}/-/{}-{}.tgz", doc.name, name, version);
+            anyhow::ensure!(
+                !paths.contains(&path),
+                "Duplicate npm attachment identity: {path}"
+            );
+            paths.push(path.clone());
+            prepared.push((attachment, version, data, path));
+        }
+        let publication = PublicationGuard::begin(ctx, repo, "npm", &paths).await?;
+        let content_repo = &publication.content_repository;
 
+        for (attachment, version, data, path) in prepared {
             let blob_info = blobstore.create_blob(&data).await?;
 
             let asset_blob = AssetService::create_asset_blob(
@@ -42,22 +61,6 @@ impl NpmEngine {
             )
             .await?;
 
-            // Find version for this attachment
-            let version = doc
-                .versions
-                .iter()
-                .find(|(_, v)| {
-                    v.dist.tarball.ends_with(filename) || filename.contains(v.version.as_str())
-                })
-                .map(|(ver, _)| ver.as_str())
-                .unwrap_or("1.0.0");
-
-            let (namespace, name) = if doc.name.starts_with('@') {
-                doc.name.split_once('/').unwrap_or(("", &doc.name))
-            } else {
-                ("", doc.name.as_str())
-            };
-
             let comp = ComponentService::find_or_create(
                 ctx,
                 content_repo.id(),
@@ -71,7 +74,6 @@ impl NpmEngine {
             // npm may submit scoped attachment keys such as
             // @scope/package-version.tgz. The download route has one tarball
             // segment, so store the canonical basename returned in metadata.
-            let path = format!("/{}/-/{}-{}.tgz", doc.name, name, version);
             AssetService::upsert_asset(
                 ctx,
                 content_repo.id(),
@@ -188,4 +190,24 @@ impl NpmEngine {
             Err(_) => Ok(None),
         }
     }
+}
+
+fn attachment_version<'a>(doc: &'a NpmPackageDocument, filename: &str) -> Result<&'a str> {
+    let basename = filename.rsplit('/').next().unwrap_or(filename);
+    let mut matching = doc
+        .versions
+        .iter()
+        .filter(|(_, detail)| detail.dist.tarball.rsplit('/').next() == Some(basename));
+    let (version, detail) = matching
+        .next()
+        .ok_or_else(|| anyhow!("npm attachment has no matching version metadata: {filename}"))?;
+    anyhow::ensure!(
+        matching.next().is_none(),
+        "Ambiguous npm attachment version: {filename}"
+    );
+    anyhow::ensure!(
+        detail.name == doc.name && detail.version == *version,
+        "npm publish metadata does not match attachment identity: {filename}"
+    );
+    Ok(version)
 }

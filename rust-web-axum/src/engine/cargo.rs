@@ -3,6 +3,7 @@ use bytes::Bytes;
 use sha2::Digest;
 use teaql_registry_core::{RepositoryConfiguration, ServiceRuntime};
 
+use super::publication::PublicationGuard;
 use crate::blobstore::BlobStore;
 use crate::format::cargo::{CargoIndexConfig, CargoIndexRecord};
 use crate::services::{AssetService, ComponentService, RepositoryService};
@@ -30,8 +31,22 @@ impl CargoEngine {
         publish_metadata: &serde_json::Value,
         crate_data: &[u8],
     ) -> Result<()> {
-        let content_repo =
-            RepositoryService::ensure_content_repository(ctx, repo.id(), "cargo").await?;
+        // Validate identity before persisting either the archive or the index.
+        let record = CargoIndexRecord::from_publish_metadata(
+            publish_metadata,
+            hex::encode(sha2::Sha256::digest(crate_data)),
+        )?;
+        anyhow::ensure!(
+            record.name == crate_name && record.vers == version,
+            "Cargo publish metadata does not match archive identity"
+        );
+        let index_data = serde_json::to_vec(&record)?;
+        let dl_path = format!("/api/v1/crates/{crate_name}/{version}/download");
+        let index_path = format!("/cargo/index-record/{crate_name}/{version}");
+        let publication =
+            PublicationGuard::begin(ctx, repo, "cargo", &[dl_path.clone(), index_path.clone()])
+                .await?;
+        let content_repo = &publication.content_repository;
         let blob_info = blobstore.create_blob(crate_data).await?;
 
         let asset_blob = AssetService::create_asset_blob(
@@ -56,7 +71,6 @@ impl CargoEngine {
         )
         .await?;
 
-        let dl_path = format!("/api/v1/crates/{}/{}/download", crate_name, version);
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),
@@ -69,15 +83,6 @@ impl CargoEngine {
 
         // Persist the exact sparse-index metadata separately from the archive.
         // Reconstructing it from only a name and version loses dependencies.
-        let record = CargoIndexRecord::from_publish_metadata(
-            publish_metadata,
-            blob_info.checksums.sha256.clone(),
-        )?;
-        anyhow::ensure!(
-            record.name == crate_name && record.vers == version,
-            "Cargo publish metadata does not match archive identity"
-        );
-        let index_data = serde_json::to_vec(&record)?;
         let index_blob = blobstore.create_blob(&index_data).await?;
         let index_asset_blob = AssetService::create_asset_blob(
             ctx,
@@ -90,7 +95,6 @@ impl CargoEngine {
             &index_blob.checksums.md5,
         )
         .await?;
-        let index_path = format!("/cargo/index-record/{crate_name}/{version}");
         AssetService::upsert_asset(
             ctx,
             content_repo.id(),
