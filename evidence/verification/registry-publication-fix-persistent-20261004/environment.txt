@@ -1,0 +1,11 @@
+run_id=registry-publication-fix-persistent-20261004
+recorded_at_utc=2026-10-04T11:57:44Z
+git_commit=0a5eee853532243f6364bb84aa662845855d973d
+git_dirty=true
+tracked_diff_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+untracked_manifest_sha256=06f2ebe3abb5b6c823ce88756aeb89bcb5576169a86b5f24e826f65fca7ed942
+platform=Linux 6.8.0-138-generic #138~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Aug  7 13:43:15 UTC  x86_64 GNU/Linux
+rustc=rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo=cargo 1.97.1 (c980f4866 2026-06-30)
+cargo_teaql=teaql 2.0.14
+postgres_server=16.15

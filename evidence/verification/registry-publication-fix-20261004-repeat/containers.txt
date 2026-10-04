@@ -1,0 +1,2 @@
+/teaql-registry-publication-fix-pg sha256:75f5a96988cdf694a215073c3e9c001b706b371e2f94df3967f2efdec2787f6b
+/teaql-registry-publication-fix-s3 sha256:612a6707053c27c41816e79e5d5d30b5ba8479fb9b500ae4908cd4a723e888fa
