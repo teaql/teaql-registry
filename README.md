@@ -403,7 +403,7 @@ MEMORY_MODE=true cargo run --release -p teaql-registry
 ### 6. Run the Test Suite
 
 ```bash
-# Complete controlled verification (requires PostgreSQL)
+# Complete controlled verification (requires PostgreSQL and S3-compatible storage)
 export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_URL="postgresql://localhost:5432/nexus_db"
 export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_USER="postgres"
 export TEAQL_REGISTRY_SERVICE_CORE_DATABASE_PASSWORD="postgres"
@@ -422,10 +422,44 @@ workspace test suite, and patch whitespace. It intentionally requires an
 explicit database configuration so a successful run is retained evidence of
 the environment that was actually tested.
 
-The retained 2026-10-01 baseline reports **95 passed, 0 failed** and a native
+**Latest verified run (2026-10-25): 114 workspace tests passed, 0 failed.**
+Formatting, generated-domain checks, strict application Clippy, and patch hygiene
+also passed. Native npm and Maven regression checks were enabled in this run.
+
+#### Native proxy validation
+
+A separate acceptance gate passed **36 phases across 12 protocols**: Cargo,
+PyPI/pip, Go Modules, NuGet, Docker/OCI, Swift, Dart pub, RubyGems, Composer,
+Conan, Hex/Mix, and Raw HTTP. Each protocol used its native client (curl for Raw)
+with a fresh client cache/project directory in every phase:
+
+| Phase | What was verified | Upstream requests |
+| --- | --- | --- |
+| Cold download | Fetch dependencies through TeaQL Registry and consume the result | At least one per protocol |
+| Cache replay | Repeat with another empty client cache | **0 for every protocol** |
+| Offline after restart | Disconnect the upstream gateway, restart Registry with the same persistent storage, and repeat | **0 for every protocol** |
+
+The commands built, imported, restored, or ran the downloaded artifacts; Conan
+checked the installed binary-package header and Raw compared exact bytes. Docker
+images were removed between phases, and every pull completed a layer download.
+Go checksum validation, NuGet signature verification over HTTPS, and Hex metadata
+signature validation remained enabled.
+
+Swift and Conan used independent hosted upstream repositories populated through
+native publish commands; Raw used an HTTP-uploaded fixture. The other protocols
+used public upstreams. The NuGet test disabled unrelated SDK background workload
+update downloads so the cache comparison covered the specified restore/build.
+
+See the [per-protocol results and tool versions](docs/proxy-native-verification.md)
+and [proxy configuration, reproduction commands, and current boundaries](docs/proxy-protocols.md).
+Per-client logs and upstream request records are retained in the development
+machine's evidence directory; disposable client state and test TLS keys are
+excluded from Git.
+
+The earlier 2026-10-01 baseline recorded **95 passed, 0 failed** and a native
 client matrix covering Cargo, Maven, npm, PyPI, Go Modules, NuGet, Swift,
-Docker/OCI, and Raw binaries. See the [verification evidence](evidence/README.md)
-for exact toolchain versions, per-format coverage, raw logs, and test boundaries.
+Docker/OCI, and Raw binaries. Historical logs and coverage are in the
+[verification evidence](evidence/README.md).
 
 ---
 
@@ -451,9 +485,3 @@ for exact toolchain versions, per-format coverage, raw logs, and test boundaries
 ## License
 
 Dual-licensed under MIT OR Apache-2.0.
-
-## Proxy protocol verification
-
-Protocol proxy configuration and native cold/cache/offline validation are documented
-in [proxy-protocols.md](docs/proxy-protocols.md). The retained acceptance matrix is
-in [proxy-native-verification.md](docs/proxy-native-verification.md).
