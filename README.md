@@ -451,3 +451,9 @@ for exact toolchain versions, per-format coverage, raw logs, and test boundaries
 ## License
 
 Dual-licensed under MIT OR Apache-2.0.
+
+## Proxy protocol verification
+
+Protocol proxy configuration and native cold/cache/offline validation are documented
+in [proxy-protocols.md](docs/proxy-protocols.md). The retained acceptance matrix is
+in [proxy-native-verification.md](docs/proxy-native-verification.md).

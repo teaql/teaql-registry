@@ -38,3 +38,5 @@ pub use pypi::PyPiEngine;
 pub use registry::RepositoryRegistry;
 pub use rubygems::RubyGemsEngine;
 pub use swift::SwiftEngine;
+
+pub mod remote;

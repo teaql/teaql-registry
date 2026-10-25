@@ -20,9 +20,11 @@ impl ProxyEngine {
             return Ok(Some(cached));
         }
 
+        let cache_key = format!("{}:{}", repo.id(), repo.remote_url());
+
         // 2. Check Negative Cache
         if crate::engine::proxy_cache::ProxyNegativeCache::global()
-            .is_negative_cached(&repo.name(), path)
+            .is_negative_cached(&cache_key, path)
         {
             info!("Proxy negative cache hit for {}:{}", repo.name(), path);
             return Ok(None);
@@ -49,12 +51,11 @@ impl ProxyEngine {
 
         if !response.status().is_success() {
             if response.status() == reqwest::StatusCode::NOT_FOUND {
-                crate::engine::proxy_cache::ProxyNegativeCache::global().record_not_found(
-                    &repo.name(),
-                    path,
-                    300,
-                );
+                crate::engine::proxy_cache::ProxyNegativeCache::global()
+                    .record_not_found(&cache_key, path, 300);
+                return Ok(None);
             }
+            response.error_for_status_ref()?;
             return Ok(None);
         }
 
@@ -68,7 +69,7 @@ impl ProxyEngine {
         let bytes = response.bytes().await?;
 
         // 3. Cache fetched artifact in local blobstore & DB
-        HostedEngine::handle_put(ctx, repo, blobstore, path, &bytes, &content_type).await?;
+        HostedEngine::cache_remote_asset(ctx, repo, blobstore, path, &bytes, &content_type).await?;
 
         Ok(Some((bytes, content_type)))
     }

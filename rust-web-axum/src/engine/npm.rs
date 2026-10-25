@@ -158,6 +158,57 @@ impl NpmEngine {
         }))
     }
 
+    /// Preserve upstream dependency metadata; the hosted document DTO omits
+    /// fields such as dependencies, optionalDependencies, engines and peer data.
+    pub async fn get_proxy_document(
+        ctx: &ServiceRuntime,
+        repo: &RepositoryConfiguration,
+        blobstore: &dyn BlobStore,
+        package_name: &str,
+        base_url: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        let path = format!("/{}", package_name);
+        let Some((bytes, _)) =
+            super::RepositoryDispatcher::get(ctx, repo, blobstore, &path).await?
+        else {
+            return Ok(None);
+        };
+        let mut doc: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let versions = doc
+            .get_mut("versions")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| anyhow!("Upstream npm document has no versions object"))?;
+        for version in versions.values_mut() {
+            if let Some(dist) = version
+                .get_mut("dist")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                let tarball = dist
+                    .get("tarball")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| anyhow!("Upstream npm version has no tarball URL"))?;
+                let url = reqwest::Url::parse(tarball)?;
+                // Standard npm registry tarballs use <package>/-/<filename>.
+                // Refuse incompatible URLs instead of returning an external URL
+                // that would require internet access from the developer machine.
+                let expected = format!("/{}/-/", package_name);
+                let filename = url
+                    .path()
+                    .strip_prefix(&expected)
+                    .filter(|name| !name.is_empty() && !name.contains('/'))
+                    .ok_or_else(|| anyhow!("Unsupported upstream npm tarball path"))?;
+                let local_url = format!(
+                    "{}/{}/-/{}",
+                    base_url.trim_end_matches('/'),
+                    package_name.replace('/', "%2F"),
+                    filename
+                );
+                dist.insert("tarball".to_string(), serde_json::Value::String(local_url));
+            }
+        }
+        Ok(Some(doc))
+    }
+
     pub async fn get_tarball(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,

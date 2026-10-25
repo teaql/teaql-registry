@@ -35,3 +35,10 @@ blobs/
 .env
 .env.local
 .env.*.local
+
+# Isolated native proxy client environment
+.proxy-client-venv/
+
+# Disposable native-client state, test TLS keys and downloaded packages
+/evidence/all-proxy/
+/scripts/__pycache__/

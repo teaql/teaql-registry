@@ -12,7 +12,7 @@ use crate::services::RepositoryService;
 use crate::services::ServiceLogService;
 
 pub async fn handle_npm_get_package(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     axum::extract::Extension(request): axum::extract::Extension<
         std::sync::Arc<crate::security::RequestContext>,
     >,
@@ -36,6 +36,24 @@ pub async fn handle_npm_get_package(
         crate::api::public_base_url(&headers),
         repo_name
     );
+    if !repo.online() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Repository is offline").into_response();
+    }
+    if repo.recipe_name().ends_with("-proxy") || repo.recipe_name() == "proxy" {
+        return match NpmEngine::get_proxy_document(
+            &request.runtime,
+            &repo,
+            &state.blobstore,
+            &package_name,
+            &base_url,
+        )
+        .await
+        {
+            Ok(Some(doc)) => Json(doc).into_response(),
+            Ok(None) => (StatusCode::NOT_FOUND, "Package not found").into_response(),
+            Err(e) => (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        };
+    }
     match NpmEngine::get_package_document(&request.runtime, &repo, &package_name, &base_url).await {
         Ok(Some(doc)) => Json(doc).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Package not found").into_response(),
@@ -211,8 +229,10 @@ pub async fn handle_npm_get_tarball(
         }
     };
 
-    match NpmEngine::get_tarball(&request.runtime, &repo, &state.blobstore, &path).await {
-        Ok(Some(data)) => {
+    match crate::engine::RepositoryDispatcher::get(&request.runtime, &repo, &state.blobstore, &path)
+        .await
+    {
+        Ok(Some((data, _content_type))) => {
             let size = data.len() as i64;
             ServiceLogService::log_event(
                 &request.runtime,

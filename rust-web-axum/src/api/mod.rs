@@ -9,6 +9,7 @@ pub mod hex_registry;
 pub mod metrics;
 pub mod npm_registry;
 pub mod nuget_registry;
+pub mod proxy_protocols;
 pub mod pypi_registry;
 pub mod repository_content;
 pub mod rest_blobstores;
@@ -424,6 +425,7 @@ pub fn build_app(state: AppState) -> Router {
         .layer(RequestBodyLimitLayer::new(5 * 1024 * 1024 * 1024usize))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn_with_state(state.clone(), proxy_protocols::proxy_request))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             authenticate_request,

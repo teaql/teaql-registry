@@ -167,6 +167,29 @@ impl HostedEngine {
         Self::persist_blob_metadata(ctx, repo, &content_repo, path, content_type, blob_info).await
     }
 
+    /// Internal cache population is independent of client publication policy.
+    pub(super) async fn cache_remote_asset(
+        ctx: &ServiceRuntime,
+        repo: &RepositoryConfiguration,
+        blobstore: &dyn BlobStore,
+        path: &str,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<()> {
+        let content_repo = RepositoryService::ensure_content_repository(
+            ctx,
+            repo.id(),
+            if repo.recipe_name().contains("maven") {
+                "maven2"
+            } else {
+                "raw"
+            },
+        )
+        .await?;
+        let blob_info = blobstore.create_blob(data).await?;
+        Self::persist_blob_metadata(ctx, repo, &content_repo, path, content_type, blob_info).await
+    }
+
     pub async fn handle_put_stream(
         ctx: &ServiceRuntime,
         repo: &RepositoryConfiguration,
