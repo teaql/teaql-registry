@@ -1,4 +1,4 @@
-import { Repository, SearchComponentItem, SearchResponse, BlobStoreItem, PersonalAccessToken, CleanupReport, GcReport, ServiceLogItem } from './types';
+import { Repository, SearchComponentItem, SearchResponse, ArtifactFacets, BlobStoreItem, PersonalAccessToken, CleanupReport, GcReport, ServiceLogItem } from './types';
 
 const API_BASE = '/service/rest/v1';
 
@@ -83,6 +83,7 @@ export async function searchComponents(params: {
   repository?: string;
   format?: string;
   page?: number;
+  faceted?: boolean;
 }): Promise<SearchResponse<SearchComponentItem>> {
   const query = new URLSearchParams();
   if (params.keyword) query.set('keyword', params.keyword);
@@ -92,10 +93,20 @@ export async function searchComponents(params: {
   if (params.repository) query.set('repository', params.repository);
   if (params.format) query.set('format', params.format);
   if (params.page) query.set('page', params.page.toString());
+  if (params.faceted) query.set('faceted', 'true');
   query.set('page_size', '20');
 
   const res = await authorizedFetch(`${API_BASE}/search?${query.toString()}`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error('Search failed');
+  return await res.json();
+}
+
+export async function fetchArtifactFacets(params: { name?: string; group?: string }): Promise<ArtifactFacets> {
+  const query = new URLSearchParams();
+  if (params.name) query.set('name', params.name);
+  if (params.group) query.set('group', params.group);
+  const res = await authorizedFetch(`${API_BASE}/search/facets?${query.toString()}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Could not load search facets');
   return await res.json();
 }
 

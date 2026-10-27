@@ -41,6 +41,15 @@ export interface SearchResponse<T> {
   page_size: number;
 }
 
+export interface RepositoryFacet {
+  name: string;
+  format: string;
+}
+
+export interface ArtifactFacets {
+  repositories: RepositoryFacet[];
+}
+
 export interface BlobStoreItem {
   name: string;
   type: string;

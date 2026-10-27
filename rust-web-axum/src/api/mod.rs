@@ -127,6 +127,7 @@ pub fn build_app(state: AppState) -> Router {
         .route("/components", get(rest_components::list_components))
         .route("/assets", get(rest_components::list_assets))
         .route("/search", get(search::handle_search_components))
+        .route("/search/facets", get(search::handle_search_facets))
         .route("/search/assets", get(search::handle_search_assets))
         // Status
         .route("/status", get(rest_status::status_ok))
