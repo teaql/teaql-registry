@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, ArrowRight, CheckCircle2, Search, ScrollText } from 'lucide-react';
 import { fetchServiceLogs, searchComponents } from '../api';
 import { Repository, SearchComponentItem, ServiceLogItem } from '../types';
+import { SearchableSelect } from './SearchableSelect';
 
 interface Props {
   repositories: Repository[];
@@ -52,7 +53,7 @@ export const DiagnosticsView: React.FC<Props> = ({ repositories, onOpenArtifacts
       </div>
       <form className="diagnostic-search" onSubmit={search}>
         <div className="diagnostic-search-field"><Search size={20} /><input className="search-input" aria-label="Package name, group or version" placeholder="Package name, group or version" value={query} onChange={event => setQuery(event.target.value)} required /></div>
-        <select className="form-select" aria-label="Repository" value={repository} onChange={event => setRepository(event.target.value)}><option value="">All repositories</option>{repositories.map(repo => <option key={repo.name} value={repo.name}>{repo.name}</option>)}</select>
+        <SearchableSelect ariaLabel="Repository" value={repository} onChange={setRepository} options={[{ value: '', label: 'All repositories' }, ...repositories.map(repo => ({ value: repo.name, label: repo.name, searchText: repo.format }))]} />
         <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Investigate'} <ArrowRight size={16} /></button>
       </form>
       {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}

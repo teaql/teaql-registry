@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertCircle, ArrowRight, CheckCircle2, ClipboardCheck, Search, ShieldCheck } from 'lucide-react';
 import { searchComponents } from '../api';
 import { Repository, SearchComponentItem } from '../types';
+import { SearchableSelect } from './SearchableSelect';
 
 interface Props {
   repositories: Repository[];
@@ -71,7 +72,7 @@ export const OfflineReadinessView: React.FC<Props> = ({ repositories, onOpenArti
           <div className="panel-heading"><ClipboardCheck size={19} /><h2>Check required versions</h2></div>
           <form onSubmit={check}>
             <div className="form-group"><label className="form-label" htmlFor="offline-format">Package format</label><select id="offline-format" className="form-select" value={format} onChange={event => { setFormat(event.target.value as PackageFormat); setRepository(''); setResults(null); }}><option value="maven2">Maven</option><option value="npm">npm</option><option value="cargo">Cargo</option></select></div>
-            <div className="form-group"><label className="form-label" htmlFor="offline-repo">Repository</label><select id="offline-repo" className="form-select" value={repository} onChange={event => setRepository(event.target.value)}><option value="">All {format} repositories</option>{matchingRepos.map(repo => <option key={repo.name} value={repo.name}>{repo.name} ({repo.type})</option>)}</select></div>
+            <div className="form-group"><label className="form-label" htmlFor="offline-repo">Repository</label><SearchableSelect id="offline-repo" value={repository} onChange={setRepository} options={[{ value: '', label: `All ${format} repositories` }, ...matchingRepos.map(repo => ({ value: repo.name, label: `${repo.name} (${repo.type})` }))]} /></div>
             <div className="form-group"><label className="form-label" htmlFor="offline-input">Exact versions · one per line · up to 20</label><textarea id="offline-input" className="form-input coordinate-input" value={input} onChange={event => setInput(event.target.value)} placeholder={format === 'maven2' ? 'org.example:library:1.2.3' : format === 'npm' ? '@scope/package@1.2.3' : 'serde@1.0.0'} /></div>
             {error && <div className="error-banner" role="alert"><AlertCircle size={16} />{error}</div>}
             <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Checking inventory…' : 'Check inventory'} <Search size={16} /></button>

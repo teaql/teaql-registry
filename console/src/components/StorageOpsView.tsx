@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BlobStoreItem, Repository, GcReport, CleanupReport } from '../types';
 import { fetchBlobStores, runGarbageCollection, runRetentionCleanup } from '../api';
 import { Database, Trash2, RefreshCw, HardDrive, CheckCircle2, ShieldAlert, AlertCircle } from 'lucide-react';
+import { SearchableSelect } from './SearchableSelect';
 
 interface Props {
   repositories: Repository[];
@@ -155,17 +156,13 @@ export const StorageOpsView: React.FC<Props> = ({ repositories }) => {
           <form onSubmit={handleCleanup}>
             <div className="form-group">
               <label className="form-label">Target Repository</label>
-              <select
-                className="form-select"
+              <SearchableSelect
+                ariaLabel="Target Repository"
                 value={selectedRepo}
-                onChange={(e) => setSelectedRepo(e.target.value)}
-              >
-                {repositories.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name} ({r.format})
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedRepo}
+                disabled={repositories.length === 0}
+                options={repositories.map(repo => ({ value: repo.name, label: `${repo.name} (${repo.format})` }))}
+              />
             </div>
 
             <div className="form-group">
