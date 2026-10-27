@@ -112,6 +112,41 @@ impl ComponentService {
         Ok(SmartList::new(filtered))
     }
 
+    /// Return a bounded page and whether more raw rows exist. The continuation
+    /// flag is computed before filtering deleted components, so searches never
+    /// stop early when a page contains deleted rows.
+    pub async fn list_search_page(
+        ctx: &ServiceRuntime,
+        content_repo_id: u64,
+        limit: u64,
+        offset: u64,
+    ) -> Result<(Vec<LoadedComponent>, bool)> {
+        let rows = Q::components_minimal()
+            .select_namespace()
+            .select_name()
+            .select_version_name()
+            .select_normalized_version()
+            .select_kind()
+            .filter_by_content_repository(content_repo_id)
+            .order_by_id_asc()
+            .comment("what: query a bounded page of registry component metadata")
+            .purpose("why: search package versions across the content repository")
+            .execute_for_page(ctx, offset, limit.saturating_add(1))
+            .await
+            .map_err(|e| anyhow!("Failed to list components: {}", e))?;
+
+        let has_more = rows.len() > limit as usize;
+        let filtered = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(LoadedComponent::from_selected)
+            .filter(|c| {
+                !c.name().is_empty() && !c.name().starts_with("[DELETED") && c.kind() != "deleted"
+            })
+            .collect();
+        Ok((filtered, has_more))
+    }
+
     pub async fn list_by_repository(
         ctx: &ServiceRuntime,
         content_repo_id: u64,

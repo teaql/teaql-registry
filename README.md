@@ -79,6 +79,7 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - A dedicated sign-in page is shown before any console data, including when anonymous package reads are enabled. Invalid credentials appear inline; console requests suppress the browser's native HTTP Basic prompt without changing package-client challenges.
   - Task-first navigation: troubleshoot failed downloads, check offline inventory, connect native clients, configure repositories, inspect artifacts, then manage storage and service logs. Repository creation and token revocation use inline panels rather than modal dialogs.
   - Repository and format lists provide type-to-filter search when they are long; dropdown arrows have consistent space from the right edge. The controls support keyboard navigation and selection.
+  - Artifact search scans all component pages in the selected repository, sorts newer versions first within each package, and loads file details only for the visible result page. The copyable dependency snippet has no terminal prompt glyph.
   - The offline inventory check accepts up to 20 exact Maven, npm, or Cargo coordinates and reports whether matching components are recorded. It does not certify transitive dependencies, protocol metadata, or blob availability; verify with a native build using an empty client cache while upstream is unavailable.
 - **Standalone Terminal TUI Client (`registry-tui`)**:
   - Zero-dependency, 2.6 MB single static binary built with Ratatui.
