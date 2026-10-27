@@ -89,6 +89,13 @@ async fn build_request_context(
     headers: &HeaderMap,
 ) -> Result<RequestContext, Response> {
     let client_ip = extract_client_ip(headers, None);
+    // Browser fetches should receive an inline sign-in error instead of the
+    // browser's native HTTP Basic authentication dialog. This only changes
+    // the challenge header; credentials and privileges are checked normally.
+    let console_request = path.starts_with("/service/rest/")
+        && headers
+            .get("x-teaql-console-request")
+            .is_some_and(|value| value.as_bytes() == b"1");
     if !state.enforces_authentication() {
         let runtime = state
             .request_runtime(1, "Default Tenant")
@@ -153,7 +160,7 @@ async fn build_request_context(
         let principal = TokenService::validate_token(&state.runtime, raw_token, required)
             .await
             .map_err(internal_error)?
-            .ok_or_else(unauthorized)?;
+            .ok_or_else(|| unauthorized(!console_request))?;
         let tenant = resolve_tenant(&state.runtime, &principal.tenant_id.to_string()).await?;
         let runtime = state
             .request_runtime(tenant.0, &tenant.1)
@@ -167,7 +174,7 @@ async fn build_request_context(
         .await
         .map_err(internal_error)?
         .filter(|user| user.id() == principal.user_id && user.user_status_id() == 1001)
-        .ok_or_else(unauthorized)?;
+        .ok_or_else(|| unauthorized(!console_request))?;
         let scope = RequestContext {
             runtime,
             tenant_id: principal.tenant_id,
@@ -178,7 +185,7 @@ async fn build_request_context(
             privileges: principal.scopes.into_iter().collect(),
             is_anonymous: false,
         };
-        authorize(&scope, method, path)?;
+        authorize(&scope, method, path, !console_request)?;
         return Ok(scope);
     }
 
@@ -191,7 +198,7 @@ async fn build_request_context(
             let tenant = resolve_tenant(&state.runtime, selector).await?;
             (tenant.0, tenant.1, Some((username, password)))
         } else {
-            return Err(unauthorized());
+            return Err(unauthorized(!console_request));
         }
     } else {
         let selector = tenant_selector.unwrap_or("1");
@@ -209,7 +216,7 @@ async fn build_request_context(
                 .await
                 .map_err(internal_error)?
                 .filter(|user| user.user_status_id() == 1001)
-                .ok_or_else(unauthorized)?;
+                .ok_or_else(|| unauthorized(!console_request))?;
         let privileges = if verify_password(&password, &user.password_hash()) {
             SecurityService::permissions_for_user(&runtime, user.id())
                 .await
@@ -226,7 +233,7 @@ async fn build_request_context(
                         && principal.user_id == user.id()
                         && principal.username == username
                 })
-                .ok_or_else(unauthorized)?;
+                .ok_or_else(|| unauthorized(!console_request))?;
             principal.scopes.into_iter().collect()
         };
         RequestContext {
@@ -251,21 +258,26 @@ async fn build_request_context(
             is_anonymous: true,
         }
     } else {
-        return Err(unauthorized());
+        return Err(unauthorized(!console_request));
     };
-    authorize(&scope, method, path)?;
+    authorize(&scope, method, path, !console_request)?;
     Ok(scope)
 }
 
 #[allow(clippy::result_large_err)]
-fn authorize(scope: &RequestContext, method: &Method, path: &str) -> Result<(), Response> {
+fn authorize(
+    scope: &RequestContext,
+    method: &Method,
+    path: &str,
+    challenge: bool,
+) -> Result<(), Response> {
     let Some(required) = required_privilege(method, path) else {
         return Ok(());
     };
     if scope.has_privilege(required) {
         Ok(())
     } else if scope.is_anonymous {
-        Err(unauthorized())
+        Err(unauthorized(challenge))
     } else {
         Err((StatusCode::FORBIDDEN, "insufficient registry permission").into_response())
     }
@@ -318,18 +330,20 @@ async fn resolve_tenant(
     Ok((tenant.id(), tenant.name().to_string()))
 }
 
-fn unauthorized() -> Response {
+fn unauthorized(challenge: bool) -> Response {
     let mut response = (
         StatusCode::UNAUTHORIZED,
         "valid registry credentials required",
     )
         .into_response();
-    response.headers_mut().insert(
-        header::WWW_AUTHENTICATE,
-        "Basic realm=\"TeaQL Registry\""
-            .parse()
-            .expect("static header is valid"),
-    );
+    if challenge {
+        response.headers_mut().insert(
+            header::WWW_AUTHENTICATE,
+            "Basic realm=\"TeaQL Registry\""
+                .parse()
+                .expect("static header is valid"),
+        );
+    }
     response
 }
 

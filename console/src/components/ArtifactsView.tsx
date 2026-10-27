@@ -6,24 +6,34 @@ import { Search, Download, Copy, Check, Terminal, FileCode, Box, ShieldCheck } f
 interface Props {
   repositories: Repository[];
   initialRepo?: string;
+  initialKeyword?: string;
 }
 
-export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo }) => {
-  const [keyword, setKeyword] = useState('');
+export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo, initialKeyword }) => {
+  const [keyword, setKeyword] = useState(initialKeyword || '');
   const [selectedRepo, setSelectedRepo] = useState(initialRepo || '');
   const [components, setComponents] = useState<SearchComponentItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
   const performSearch = async () => {
     setLoading(true);
-    const res = await searchComponents({
-      keyword: keyword.trim() || undefined,
-      repository: selectedRepo || undefined,
-    });
-    setComponents(res.items);
-    setLoading(false);
+    setError('');
+    try {
+      const res = await searchComponents({ keyword: keyword.trim() || undefined, repository: selectedRepo || undefined });
+      setComponents(res.items);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Search failed');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    setKeyword(initialKeyword || '');
+    setSelectedRepo(initialRepo || '');
+  }, [initialKeyword, initialRepo]);
 
   useEffect(() => {
     performSearch();
@@ -98,6 +108,7 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo }) =>
     <div>
       <div className="page-intro">
         <div>
+          <div className="eyebrow">05 · VERIFY A PUBLICATION</div>
           <h1 className="page-title">Artifacts & Packages</h1>
           <p className="page-desc">Search, inspect and install artifacts with auto-generated CLI snippets.</p>
         </div>
@@ -129,6 +140,8 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo }) =>
           Search
         </button>
       </form>
+
+      {error && <div className="error-banner" role="alert">{error}</div>}
 
       {/* Results List */}
       {loading ? (
