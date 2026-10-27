@@ -6,6 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use teaql_registry_core::Q;
 
 use crate::api::AppState;
 use crate::services::{AssetService, ComponentService, RepositoryService};
@@ -20,6 +21,111 @@ pub struct SearchQueryParams {
     pub keyword: Option<String>,
     pub page: Option<usize>,
     pub page_size: Option<usize>,
+    pub faceted: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FacetQueryParams {
+    pub name: Option<String>,
+    pub group: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RepositoryFacet {
+    pub name: String,
+    pub format: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FacetResponse {
+    pub repositories: Vec<RepositoryFacet>,
+}
+
+/// TeaQL's relation Facet finds content repositories represented in the full
+/// matching component set, independently of the visible result page.
+pub async fn handle_search_facets(
+    State(_state): State<AppState>,
+    axum::extract::Extension(request): axum::extract::Extension<
+        std::sync::Arc<crate::security::RequestContext>,
+    >,
+    Query(params): Query<FacetQueryParams>,
+) -> Response {
+    let mut query = Q::components_minimal()
+        .select_name()
+        .with_name_is_not("")
+        .with_name_not_containing("[DELETED")
+        .with_kind_is_not("deleted");
+
+    if let Some(name) = params
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        query = query.with_name_containing(name.to_lowercase());
+    }
+    if let Some(group) = params
+        .group
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        query = query.with_namespace_containing(group.to_lowercase());
+    }
+
+    let rows = match query
+        .facet_by_content_repository_as_with_options(
+            "repositories",
+            Q::content_repositories_minimal()
+                .select_repository_id()
+                .select_format_name()
+                .order_by_repository_id_asc()
+                .limit(1000),
+            false,
+        )
+        .order_by_id_asc()
+        .limit(1)
+        .comment("what: find content repository facets for matching package names")
+        .purpose("why: let users narrow artifact search by repository and format")
+        .execute_for_list(request.runtime.as_ref())
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+
+    let matched: HashMap<u64, String> = rows
+        .facet("repositories")
+        .into_iter()
+        .flat_map(|facet| facet.iter())
+        .filter_map(|row| {
+            Some((
+                row.get("repository_id")?.try_u64()?,
+                row.get("format_name")?.try_text()?.to_string(),
+            ))
+        })
+        .collect();
+
+    let repos = match RepositoryService::list(&request.runtime).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    let mut repositories: Vec<_> = repos
+        .iter()
+        .filter_map(|repo| {
+            matched.get(&repo.id()).map(|format| RepositoryFacet {
+                name: repo.name().to_string(),
+                format: format.clone(),
+            })
+        })
+        .collect();
+    repositories.sort_by(|left, right| left.name.cmp(&right.name));
+
+    Json(FacetResponse { repositories }).into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -194,7 +300,8 @@ pub async fn handle_search_components(
                 _ => continue,
             };
 
-        let has_filter = params.name.is_some()
+        let has_filter = params.faceted.unwrap_or(false)
+            || params.name.is_some()
             || params.version.is_some()
             || params.group.is_some()
             || params.keyword.is_some();
