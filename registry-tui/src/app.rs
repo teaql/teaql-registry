@@ -3,7 +3,15 @@ use std::sync::Arc;
 use crossterm::event::KeyCode;
 
 use crate::api::RegistryApi;
-use crate::types::{ComponentItem, RepositoryItem, SearchResponse, ServerOverview};
+use crate::types::{
+    ComponentItem, ComponentSearch, RepositoryItem, SearchResponse, ServerOverview, ServiceLogItem,
+};
+
+#[derive(Debug, Clone)]
+pub struct ReadinessResult {
+    pub coordinate: String,
+    pub repository: Option<String>,
+}
 
 // ── Transcript Block ─────────────────────────────────────────────
 
@@ -18,8 +26,29 @@ pub enum Block {
     Success(String),
     /// Error message
     Error(String),
+    Home {
+        recent_failures: Vec<ServiceLogItem>,
+        repository_count: usize,
+        logs_error: bool,
+        cursor: usize,
+    },
+    FailureList {
+        query: String,
+        logs: Vec<ServiceLogItem>,
+        cursor: usize,
+    },
+    FailureDetail {
+        log: ServiceLogItem,
+    },
+    ReadinessGuide,
+    ReadinessResults {
+        results: Vec<ReadinessResult>,
+    },
+    Operations,
     /// Status dashboard
-    Status { overview: ServerOverview },
+    Status {
+        overview: ServerOverview,
+    },
     /// Repository list (interactive if it's the latest table)
     RepoList {
         repos: Vec<RepositoryItem>,
@@ -37,7 +66,9 @@ pub enum Block {
         cursor: usize,
     },
     /// Component detail with assets
-    ComponentDetail { component: ComponentItem },
+    ComponentDetail {
+        component: ComponentItem,
+    },
     /// Help text
     Help,
 }
@@ -45,7 +76,13 @@ pub enum Block {
 impl Block {
     /// Returns true if this block has an interactive cursor.
     pub fn is_interactive(&self) -> bool {
-        matches!(self, Block::RepoList { .. } | Block::SearchResults { .. })
+        matches!(
+            self,
+            Block::Home { .. }
+                | Block::FailureList { .. }
+                | Block::RepoList { .. }
+                | Block::SearchResults { .. }
+        )
     }
 }
 
@@ -61,6 +98,7 @@ pub enum Action {
 
 pub struct App {
     pub client: Arc<dyn RegistryApi>,
+    pub endpoint: String,
 
     /// The transcript — an ordered list of blocks.
     pub blocks: Vec<Block>,
@@ -87,9 +125,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(client: Arc<dyn RegistryApi>) -> Self {
+    pub fn new(client: Arc<dyn RegistryApi>, endpoint: String) -> Self {
         Self {
             client,
+            endpoint,
             blocks: Vec::new(),
             scroll_offset: 0,
             input: String::new(),
@@ -107,23 +146,31 @@ impl App {
 
     /// Called once at startup: load data and push initial blocks.
     pub async fn initialize(&mut self) {
-        // Load data
-        if let Ok(overview) = self.client.fetch_overview().await {
-            self.overview = overview;
-        }
         if let Ok(repos) = self.client.fetch_repositories().await {
             self.repositories = repos;
         }
+        self.show_home().await;
+    }
 
-        // Push startup blocks
-        self.blocks.push(Block::Info("Welcome to TeaQL Registry TUI. Type a command below, or 'help' for available commands.".to_string()));
-        self.blocks.push(Block::Status {
-            overview: self.overview.clone(),
-        });
-        self.blocks.push(Block::RepoList {
-            repos: self.repositories.clone(),
+    async fn show_home(&mut self) {
+        let (recent_failures, logs_error) = match self.client.fetch_service_logs(20).await {
+            Ok(logs) => (logs.into_iter().filter(is_failure).take(3).collect(), false),
+            Err(_) => (Vec::new(), true),
+        };
+        self.blocks.push(Block::Home {
+            recent_failures,
+            repository_count: self.repositories.len(),
+            logs_error,
             cursor: 0,
         });
+    }
+
+    pub async fn open_startup_package(&mut self, package: &str) {
+        self.execute_command(&format!("search {package}")).await;
+    }
+
+    pub async fn open_startup_failure(&mut self, query: &str) {
+        self.show_failures(query).await;
     }
 
     // ── Key handling ─────────────────────────────────────────────
@@ -142,7 +189,7 @@ impl App {
                     return self.execute_command(&cmd).await;
                 }
                 // Input empty — inspect currently selected item
-                self.inspect_active_selection();
+                self.activate_selection().await;
                 self.scroll_offset = 0;
                 Action::None
             }
@@ -150,26 +197,38 @@ impl App {
             // Input editing
             KeyCode::Char(c) => {
                 self.input.insert(self.input_cursor, c);
-                self.input_cursor += 1;
+                self.input_cursor += c.len_utf8();
                 self.cmd_history_idx = None;
                 Action::None
             }
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
-                    self.input_cursor -= 1;
+                    self.input_cursor = self.input[..self.input_cursor]
+                        .char_indices()
+                        .last()
+                        .map(|(index, _)| index)
+                        .unwrap_or(0);
                     self.input.remove(self.input_cursor);
                 }
                 Action::None
             }
             KeyCode::Left => {
                 if self.input_cursor > 0 {
-                    self.input_cursor -= 1;
+                    self.input_cursor = self.input[..self.input_cursor]
+                        .char_indices()
+                        .last()
+                        .map(|(index, _)| index)
+                        .unwrap_or(0);
                 }
                 Action::None
             }
             KeyCode::Right => {
                 if self.input_cursor < self.input.len() {
-                    self.input_cursor += 1;
+                    self.input_cursor += self.input[self.input_cursor..]
+                        .chars()
+                        .next()
+                        .map(char::len_utf8)
+                        .unwrap_or(0);
                 }
                 Action::None
             }
@@ -236,6 +295,16 @@ impl App {
         match verb.as_str() {
             "q" | "quit" | "exit" => return Action::Quit,
 
+            "home" | "menu" => self.show_home().await,
+
+            "1" | "failures" | "failed" => self.show_failures(&args.join(" ")).await,
+
+            "2" | "ready" | "readiness" => self.check_readiness(&args).await,
+
+            "3" | "connect" => self.show_connection(&args),
+
+            "5" | "ops" | "operations" => self.blocks.push(Block::Operations),
+
             "help" | "h" | "?" => {
                 self.blocks.push(Block::Help);
             }
@@ -269,16 +338,27 @@ impl App {
                 self.handle_inspect(&args);
             }
 
-            "search" | "s" | "find" => {
+            "4" | "verify" | "search" | "s" | "find" => {
                 let keyword = args.join(" ");
-                if let Ok(results) = self.client.search_components(&keyword).await {
-                    self.search_results = results;
+                if keyword.is_empty() {
+                    self.blocks.push(Block::Info(
+                        "Enter a package name or coordinate: search <package>.".to_string(),
+                    ));
+                } else {
+                    match self.client.search_components(&keyword).await {
+                        Ok(results) => {
+                            self.search_results = results;
+                            self.blocks.push(Block::SearchResults {
+                                keyword,
+                                results: self.search_results.clone(),
+                                cursor: 0,
+                            });
+                        }
+                        Err(error) => self
+                            .blocks
+                            .push(Block::Error(format!("Artifact search failed: {error}"))),
+                    }
                 }
-                self.blocks.push(Block::SearchResults {
-                    keyword: args.join(" "),
-                    results: self.search_results.clone(),
-                    cursor: 0,
-                });
             }
 
             "components" | "comps" | "comp" => {
@@ -375,7 +455,7 @@ impl App {
                     Ok(token) => {
                         self.blocks
                             .push(Block::Success(format!("Token: {}", token)));
-                        self.add_log(&format!("TOKEN: {}", token));
+                        self.add_log("SUCCESS: Temporary token generated.");
                     }
                     Err(e) => {
                         self.blocks
@@ -396,6 +476,220 @@ impl App {
         Action::None
     }
 
+    async fn show_failures(&mut self, query: &str) {
+        match self.client.fetch_service_logs(100).await {
+            Ok(logs) => {
+                let needle = query.to_lowercase();
+                let logs = logs
+                    .into_iter()
+                    .filter(is_failure)
+                    .filter(|log| {
+                        needle.is_empty()
+                            || format!(
+                                "{} {} {} {}",
+                                log.artifact_path,
+                                log.repository_name,
+                                log.error_message,
+                                log.action
+                            )
+                            .to_lowercase()
+                            .contains(&needle)
+                    })
+                    .collect();
+                self.blocks.push(Block::FailureList {
+                    query: query.to_string(),
+                    logs,
+                    cursor: 0,
+                });
+            }
+            Err(error) => self.blocks.push(Block::Error(format!(
+                "Could not load recent requests: {error}"
+            ))),
+        }
+    }
+
+    fn show_connection(&mut self, args: &[&str]) {
+        let filter = args.first().copied().unwrap_or("");
+        if let Some(repo) = self.repositories.iter().find(|repo| repo.name == filter) {
+            self.blocks.push(Block::RepoDetail {
+                repo: repo.clone(),
+                endpoint: self.endpoint.clone(),
+            });
+            return;
+        }
+        let repos: Vec<_> = self
+            .repositories
+            .iter()
+            .filter(|repo| filter.is_empty() || repo.format.eq_ignore_ascii_case(filter))
+            .cloned()
+            .collect();
+        if repos.is_empty() {
+            self.blocks.push(Block::Error(format!(
+                "No repository or format matches '{filter}'. Type 'repos' to browse all."
+            )));
+            return;
+        }
+        self.blocks.push(Block::Info(
+            "Choose a repository with ↑↓ and Enter for its native-client setup. Use 'token' if the client needs a new credential."
+                .to_string(),
+        ));
+        self.blocks.push(Block::RepoList { repos, cursor: 0 });
+    }
+
+    async fn check_readiness(&mut self, args: &[&str]) {
+        let Some(format) = args
+            .first()
+            .and_then(|value| match value.to_lowercase().as_str() {
+                "maven" | "maven2" => Some("maven2"),
+                "npm" => Some("npm"),
+                "cargo" => Some("cargo"),
+                _ => None,
+            })
+        else {
+            self.blocks.push(Block::ReadinessGuide);
+            return;
+        };
+
+        let mut coordinates = Vec::new();
+        let mut repository = None;
+        let mut index = 1;
+        while index < args.len() {
+            if args[index] == "--repo" {
+                if repository.is_some() || index + 1 >= args.len() {
+                    self.blocks.push(Block::Error(
+                        "Use --repo followed by one repository name.".to_string(),
+                    ));
+                    return;
+                }
+                repository = Some(args[index + 1].to_string());
+                index += 2;
+            } else {
+                coordinates.push(args[index]);
+                index += 1;
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        coordinates.retain(|coordinate| seen.insert(*coordinate));
+        if coordinates.is_empty() || coordinates.len() > 20 {
+            self.blocks.push(Block::Error(
+                "Enter 1–20 exact coordinates after the format.".to_string(),
+            ));
+            return;
+        }
+        if let Some(ref name) = repository {
+            let Some(repo) = self.repositories.iter().find(|repo| repo.name == *name) else {
+                self.blocks.push(Block::Error(format!(
+                    "Repository '{name}' is not available."
+                )));
+                return;
+            };
+            if !repo.format.eq_ignore_ascii_case(format)
+                || repo.repo_type.eq_ignore_ascii_case("group")
+            {
+                self.blocks.push(Block::Error(format!(
+                    "Repository '{name}' is not a {format} hosted or proxy repository."
+                )));
+                return;
+            }
+        }
+
+        let mut results = Vec::new();
+        for coordinate in coordinates {
+            let Some((group, name, version)) = parse_coordinate(format, coordinate) else {
+                self.blocks.push(Block::Error(format!(
+                    "Invalid {format} coordinate '{coordinate}'. Type 'ready' for examples."
+                )));
+                return;
+            };
+            let query = ComponentSearch {
+                name,
+                group,
+                version,
+                format: format.to_string(),
+                repository: repository.clone(),
+                page: 1,
+                page_size: 20,
+            };
+            match self.find_exact_component(query).await {
+                Ok(found) => results.push(ReadinessResult {
+                    coordinate: coordinate.to_string(),
+                    repository: found,
+                }),
+                Err(error) => {
+                    self.blocks.push(Block::Error(format!(
+                        "Inventory check stopped at '{coordinate}': {error}"
+                    )));
+                    return;
+                }
+            }
+        }
+        self.blocks.push(Block::ReadinessResults { results });
+    }
+
+    async fn find_exact_component(
+        &self,
+        mut query: ComponentSearch,
+    ) -> anyhow::Result<Option<String>> {
+        loop {
+            let response = self.client.search_exact_page(&query).await?;
+            if let Some(item) = response.items.iter().find(|item| {
+                item.name == query.name
+                    && item.version == query.version
+                    && query
+                        .group
+                        .as_ref()
+                        .is_none_or(|group| item.group == *group)
+                    && item.format.eq_ignore_ascii_case(&query.format)
+                    && query
+                        .repository
+                        .as_ref()
+                        .is_none_or(|repo| item.repository == *repo)
+            }) {
+                return Ok(Some(item.repository.clone()));
+            }
+            if response.items.is_empty()
+                || query.page.saturating_mul(query.page_size) >= response.total
+            {
+                return Ok(None);
+            }
+            query.page += 1;
+        }
+    }
+
+    async fn activate_selection(&mut self) {
+        match self
+            .blocks
+            .iter()
+            .rev()
+            .find(|block| block.is_interactive())
+            .cloned()
+        {
+            Some(Block::Home { cursor, .. }) => match cursor {
+                0 => self.show_failures("").await,
+                1 => {
+                    self.blocks.push(Block::ReadinessGuide);
+                    self.input = "ready ".to_string();
+                    self.input_cursor = self.input.len();
+                }
+                2 => self.show_connection(&[]),
+                3 => {
+                    self.blocks.push(Block::Info(
+                        "Enter a package name to inspect published versions and files.".to_string(),
+                    ));
+                    self.input = "search ".to_string();
+                    self.input_cursor = self.input.len();
+                }
+                _ => self.blocks.push(Block::Operations),
+            },
+            Some(Block::FailureList { logs, cursor, .. }) => {
+                if let Some(log) = logs.get(cursor) {
+                    self.blocks.push(Block::FailureDetail { log: log.clone() });
+                }
+            }
+            _ => self.inspect_active_selection(),
+        }
+    }
+
     // ── Inspect handler ──────────────────────────────────────────
 
     fn handle_inspect(&mut self, args: &[&str]) {
@@ -404,7 +698,7 @@ impl App {
             if let Some(repo) = self.repositories.iter().find(|r| r.name == *name) {
                 self.blocks.push(Block::RepoDetail {
                     repo: repo.clone(),
-                    endpoint: "http://localhost:8081".to_string(),
+                    endpoint: self.endpoint.clone(),
                 });
                 return;
             }
@@ -427,7 +721,7 @@ impl App {
                         if let Some(repo) = repos.get(cursor) {
                             self.blocks.push(Block::RepoDetail {
                                 repo: repo.clone(),
-                                endpoint: "http://localhost:8081".to_string(),
+                                endpoint: self.endpoint.clone(),
                             });
                         }
                     }
@@ -460,7 +754,7 @@ impl App {
                         // Show repo detail + its components
                         self.blocks.push(Block::RepoDetail {
                             repo: repo.clone(),
-                            endpoint: "http://localhost:8081".to_string(),
+                            endpoint: self.endpoint.clone(),
                         });
                     }
                 }
@@ -487,7 +781,10 @@ impl App {
     fn move_active_cursor_up(&mut self) -> bool {
         if let Some(block) = self.find_last_interactive_mut() {
             match block {
-                Block::RepoList { cursor, .. } | Block::SearchResults { cursor, .. }
+                Block::Home { cursor, .. }
+                | Block::FailureList { cursor, .. }
+                | Block::RepoList { cursor, .. }
+                | Block::SearchResults { cursor, .. }
                     if *cursor > 0 =>
                 {
                     *cursor -= 1;
@@ -502,6 +799,14 @@ impl App {
     fn move_active_cursor_down(&mut self) -> bool {
         if let Some(block) = self.find_last_interactive_mut() {
             match block {
+                Block::Home { cursor, .. } if *cursor < 4 => {
+                    *cursor += 1;
+                    return true;
+                }
+                Block::FailureList { logs, cursor, .. } if *cursor + 1 < logs.len() => {
+                    *cursor += 1;
+                    return true;
+                }
                 Block::RepoList { repos, cursor } if *cursor + 1 < repos.len() => {
                     *cursor += 1;
                     return true;
@@ -570,6 +875,43 @@ impl App {
     }
 }
 
+fn is_failure(log: &ServiceLogItem) -> bool {
+    if !log.error_message.is_empty() {
+        return true;
+    }
+    if log.status.eq_ignore_ascii_case("success") || log.status.eq_ignore_ascii_case("ok") {
+        return false;
+    }
+    match log.status.parse::<u16>() {
+        Ok(code) => !(200..300).contains(&code),
+        Err(_) => !log.status.is_empty(),
+    }
+}
+
+fn parse_coordinate(format: &str, coordinate: &str) -> Option<(Option<String>, String, String)> {
+    if format == "maven2" {
+        let mut parts = coordinate.split(':');
+        let (Some(group), Some(name), Some(version), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        if group.is_empty() || name.is_empty() || version.is_empty() {
+            return None;
+        }
+        return Some((
+            Some(group.to_string()),
+            name.to_string(),
+            version.to_string(),
+        ));
+    }
+    let (name, version) = coordinate.rsplit_once('@')?;
+    if name.is_empty() || version.is_empty() {
+        return None;
+    }
+    Some((None, name.to_string(), version.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +921,7 @@ mod tests {
     struct MockApi {
         pub repos: Vec<RepositoryItem>,
         pub search: SearchResponse,
+        pub logs: Vec<ServiceLogItem>,
         pub gc_result: Result<GcReport, String>,
     }
 
@@ -615,6 +958,21 @@ mod tests {
                     page: 1,
                     page_size: 50,
                 },
+                logs: vec![
+                    ServiceLogItem {
+                        status: "404".to_string(),
+                        repository_name: "maven-releases".to_string(),
+                        artifact_path: "com/example/my-lib/1.0.0".to_string(),
+                        error_message: "Not found upstream".to_string(),
+                        ..Default::default()
+                    },
+                    ServiceLogItem {
+                        status: "200".to_string(),
+                        repository_name: "maven-releases".to_string(),
+                        artifact_path: "com/example/other".to_string(),
+                        ..Default::default()
+                    },
+                ],
                 gc_result: Ok(GcReport {
                     scanned_blobs_count: 10,
                     orphaned_blobs_deleted: 2,
@@ -648,6 +1006,17 @@ mod tests {
             Ok(self.search.clone())
         }
 
+        async fn search_exact_page(
+            &self,
+            _query: &ComponentSearch,
+        ) -> anyhow::Result<SearchResponse> {
+            Ok(self.search.clone())
+        }
+
+        async fn fetch_service_logs(&self, _size: usize) -> anyhow::Result<Vec<ServiceLogItem>> {
+            Ok(self.logs.clone())
+        }
+
         async fn fetch_metrics(&self) -> anyhow::Result<String> {
             Ok("# mock metrics".to_string())
         }
@@ -674,18 +1043,17 @@ mod tests {
     }
 
     fn make_app(mock: MockApi) -> App {
-        App::new(Arc::new(mock))
+        App::new(Arc::new(mock), "https://registry.example.test".to_string())
     }
 
     #[tokio::test]
     async fn test_initialize_creates_blocks() {
         let mut app = make_app(MockApi::default_ok());
         app.initialize().await;
-        // Should have 3 blocks: Info, Status, RepoList
-        assert_eq!(app.blocks.len(), 3);
-        assert!(matches!(app.blocks[0], Block::Info(_)));
-        assert!(matches!(app.blocks[1], Block::Status { .. }));
-        assert!(matches!(app.blocks[2], Block::RepoList { .. }));
+        assert_eq!(app.blocks.len(), 1);
+        assert!(
+            matches!(&app.blocks[0], Block::Home { recent_failures, repository_count: 2, .. } if recent_failures.len() == 1)
+        );
     }
 
     #[tokio::test]
@@ -754,18 +1122,18 @@ mod tests {
         let mut app = make_app(MockApi::default_ok());
         app.initialize().await;
 
-        // Last interactive block is RepoList with cursor=0
+        // The first task is selected on the home screen.
         app.move_active_cursor_down();
-        if let Some(Block::RepoList { cursor, .. }) =
+        if let Some(Block::Home { cursor, .. }) =
             app.blocks.iter().rev().find(|b| b.is_interactive())
         {
             assert_eq!(*cursor, 1);
         } else {
-            panic!("Expected RepoList block");
+            panic!("Expected Home block");
         }
 
         app.move_active_cursor_up();
-        if let Some(Block::RepoList { cursor, .. }) =
+        if let Some(Block::Home { cursor, .. }) =
             app.blocks.iter().rev().find(|b| b.is_interactive())
         {
             assert_eq!(*cursor, 0);
@@ -835,5 +1203,66 @@ mod tests {
             .iter()
             .find(|b| matches!(b, Block::Success(s) if s.contains("tql_pat_mock_token_abc123")));
         assert!(success_block.is_some());
+        assert!(!app
+            .op_log
+            .iter()
+            .any(|entry| entry.contains("tql_pat_mock_token")));
+    }
+
+    #[tokio::test]
+    async fn test_home_opens_failure_details() {
+        let mut app = make_app(MockApi::default_ok());
+        app.initialize().await;
+        app.handle_key(KeyCode::Enter).await;
+        assert!(
+            matches!(&app.blocks.last().unwrap(), Block::FailureList { logs, .. } if logs.len() == 1)
+        );
+        app.handle_key(KeyCode::Enter).await;
+        assert!(
+            matches!(&app.blocks.last().unwrap(), Block::FailureDetail { log } if log.status == "404")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_readiness_checks_exact_coordinates() {
+        let mut app = make_app(MockApi::default_ok());
+        app.initialize().await;
+        app.execute_command(
+            "ready maven2 com.example:my-lib:1.0.0 com.example:missing:1.0.0 --repo maven-releases",
+        )
+        .await;
+        assert!(
+            matches!(&app.blocks.last().unwrap(), Block::ReadinessResults { results }
+            if results.len() == 2 && results[0].repository.as_deref() == Some("maven-releases") && results[1].repository.is_none())
+        );
+        app.execute_command("ready npm invalid-coordinate").await;
+        assert!(matches!(app.blocks.last().unwrap(), Block::Error(_)));
+        app.execute_command("ready npm my-lib@1.0.0 --repo maven-releases")
+            .await;
+        assert!(
+            matches!(app.blocks.last().unwrap(), Block::Error(message) if message.contains("not a npm"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_connect_uses_configured_endpoint() {
+        let mut app = make_app(MockApi::default_ok());
+        app.initialize().await;
+        app.execute_command("connect maven-releases").await;
+        assert!(
+            matches!(&app.blocks.last().unwrap(), Block::RepoDetail { endpoint, .. }
+            if endpoint == "https://registry.example.test")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unicode_input_keeps_byte_boundaries() {
+        let mut app = make_app(MockApi::default_ok());
+        app.handle_key(KeyCode::Char('包')).await;
+        app.handle_key(KeyCode::Char('a')).await;
+        app.handle_key(KeyCode::Left).await;
+        app.handle_key(KeyCode::Backspace).await;
+        assert_eq!(app.input, "a");
+        assert_eq!(app.input_cursor, 0);
     }
 }
