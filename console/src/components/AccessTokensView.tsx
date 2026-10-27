@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PersonalAccessToken } from '../types';
 import { fetchTokens, createToken, revokeToken } from '../api';
-import { Key, Plus, Trash2, Copy, Check, Terminal, Shield, AlertCircle } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check, AlertCircle } from 'lucide-react';
 
 export const AccessTokensView: React.FC = () => {
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
@@ -144,33 +144,6 @@ export const AccessTokensView: React.FC = () => {
           )}
         </div>
 
-        {/* CLI Configuration Cheat Sheet */}
-        <div className="repo-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <Terminal size={20} color="#64748B" />
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>CLI Integration Guide</h3>
-          </div>
-          <p style={{ fontSize: '0.875rem', color: '#64748B', marginBottom: '1rem' }}>
-            Use your token with standard CLI tools:
-          </p>
-
-          <div style={{ fontSize: '0.85rem', color: '#334155' }}>
-            <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>1. NPM (~/.npmrc):</div>
-            <div className="code-snippet-box" style={{ margin: '0 0 0.75rem 0', padding: '0.5rem 0.75rem' }}>
-              <code>//localhost:8081/repository/npm-hosted/:_authToken=YOUR_TOKEN</code>
-            </div>
-
-            <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>2. Docker CLI:</div>
-            <div className="code-snippet-box" style={{ margin: '0 0 0.75rem 0', padding: '0.5rem 0.75rem' }}>
-              <code>docker login localhost:8081 -u admin -p YOUR_TOKEN</code>
-            </div>
-
-            <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>3. Cargo (~/.cargo/credentials.toml):</div>
-            <div className="code-snippet-box" style={{ margin: 0, padding: '0.5rem 0.75rem' }}>
-              <code>[registries.teaql]{'\n'}token = "YOUR_TOKEN"</code>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Active Tokens List */}
@@ -212,8 +185,7 @@ export const AccessTokensView: React.FC = () => {
       )}
 
       {revokeTargetId && (
-        <div className="modal-backdrop" onClick={() => setRevokeTargetId(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="repo-card inline-confirm" role="alertdialog" aria-label="Revoke token">
             <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Revoke Token</h2>
             <p className="confirm-modal-text">
               This action cannot be undone. Any CI/CD pipelines using this token will lose access.
@@ -224,7 +196,6 @@ export const AccessTokensView: React.FC = () => {
                 <Trash2 size={14} /> Revoke Token
               </button>
             </div>
-          </div>
         </div>
       )}
     </div>

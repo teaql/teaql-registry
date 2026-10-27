@@ -12,7 +12,8 @@ interface Props {
 export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onSelectRepoForSearch }) => {
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [showModal, setShowModal] = useState<boolean>(false);
+  const [showCreateForm, setShowCreateForm] = useState<boolean>(false);
+  const [createError, setCreateError] = useState('');
 
   // New Repo Form State
   const [name, setName] = useState('');
@@ -40,21 +41,20 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
     e.preventDefault();
     if (!name.trim()) return;
     setIsSubmitting(true);
-    const ok = await createRepository({
-      name: name.trim(),
-      format,
-      type,
-      blobStoreName,
-      remoteUrl: type === 'proxy' ? remoteUrl.trim() : undefined,
-    });
-    setIsSubmitting(false);
-    if (ok) {
-      setShowModal(false);
+    setCreateError('');
+    try {
+      await createRepository({
+        name: name.trim(), format, type, blobStoreName,
+        remoteUrl: type === 'proxy' ? remoteUrl.trim() : undefined,
+      });
+      setShowCreateForm(false);
       setName('');
       setRemoteUrl('');
       onRefresh();
-    } else {
-      alert('Failed to create repository');
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : 'Failed to create repository');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -65,10 +65,25 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
           <h1 className="page-title">Repositories</h1>
           <p className="page-desc">Manage package repositories across 14 ecosystems with multi-tier storage.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> Create Repository
+        <button className="btn btn-primary" onClick={() => setShowCreateForm(!showCreateForm)}>
+          <Plus size={16} /> {showCreateForm ? 'Close form' : 'Create Repository'}
         </button>
       </div>
+
+      {showCreateForm && (
+        <section className="repo-card create-repository-panel" aria-label="Create repository">
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Create Repository</h2>
+          {createError && <div className="error-banner" role="alert">{createError}</div>}
+          <form onSubmit={handleCreate} className="create-repository-grid">
+            <div className="form-group"><label className="form-label" htmlFor="repo-name">Repository Name</label><input id="repo-name" className="form-input" placeholder="e.g. my-releases" value={name} onChange={e => setName(e.target.value)} required /></div>
+            <div className="form-group"><label className="form-label" htmlFor="repo-format">Format</label><select id="repo-format" className="form-select" value={format} onChange={e => setFormat(e.target.value)}>{formats.filter(item => item !== 'ALL').map(item => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select></div>
+            <div className="form-group"><label className="form-label" htmlFor="repo-type">Type</label><select id="repo-type" className="form-select" value={type} onChange={e => setType(e.target.value)}><option value="hosted">Hosted</option><option value="proxy">Proxy</option><option value="group">Group</option></select></div>
+            <div className="form-group"><label className="form-label" htmlFor="repo-blobstore">BlobStore</label><input id="repo-blobstore" className="form-input" value={blobStoreName} onChange={e => setBlobStoreName(e.target.value)} required /></div>
+            {type === 'proxy' && <div className="form-group create-repository-wide"><label className="form-label" htmlFor="repo-upstream">Remote Upstream URL</label><input id="repo-upstream" className="form-input" type="url" placeholder="https://repo.maven.apache.org/maven2" value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} required /></div>}
+            <div className="create-repository-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowCreateForm(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={isSubmitting}>{isSubmitting ? 'Creating…' : 'Create repository'}</button></div>
+          </form>
+        </section>
+      )}
 
       {/* Format Filter Pills */}
       <div className="filter-pills">
@@ -123,87 +138,6 @@ export const RepositoriesView: React.FC<Props> = ({ repositories, onRefresh, onS
         ))}
       </div>
 
-      {/* Create Modal */}
-      {showModal && (
-        <div className="modal-backdrop" onClick={() => setShowModal(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Create Repository</h2>
-            <form onSubmit={handleCreate}>
-              <div className="form-group">
-                <label className="form-label">Repository Name</label>
-                <input
-                  className="form-input"
-                  placeholder="e.g. my-releases"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Format</label>
-                <select className="form-select" value={format} onChange={(e) => setFormat(e.target.value)}>
-                  <option value="maven2">Maven2</option>
-                  <option value="docker">Docker</option>
-                  <option value="npm">NPM</option>
-                  <option value="pypi">PyPI</option>
-                  <option value="cargo">Cargo (Rust)</option>
-                  <option value="gomod">Go Modules</option>
-                  <option value="nuget">NuGet (.NET)</option>
-                  <option value="swift">Swift Package</option>
-                  <option value="dart">Dart Pub</option>
-                  <option value="rubygems">RubyGems</option>
-                  <option value="composer">Composer (PHP)</option>
-                  <option value="conan">Conan 2 (C/C++)</option>
-                  <option value="hex">Hex (Elixir/Erlang)</option>
-                  <option value="raw">Raw (Generic)</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Type</label>
-                <select className="form-select" value={type} onChange={(e) => setType(e.target.value)}>
-                  <option value="hosted">Hosted (Private Packages)</option>
-                  <option value="proxy">Proxy (Remote Caching)</option>
-                  <option value="group">Group (Virtual Aggregation)</option>
-                </select>
-              </div>
-
-              {type === 'proxy' && (
-                <div className="form-group">
-                  <label className="form-label">Remote Upstream URL</label>
-                  <input
-                    className="form-input"
-                    placeholder="https://repo.maven.apache.org/maven2"
-                    value={remoteUrl}
-                    onChange={(e) => setRemoteUrl(e.target.value)}
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label">BlobStore</label>
-                <input
-                  className="form-input"
-                  value={blobStoreName}
-                  onChange={(e) => setBlobStoreName(e.target.value)}
-                  placeholder="default"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-                  {isSubmitting ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

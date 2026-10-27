@@ -1,7 +1,7 @@
 import React from 'react';
-import { Sparkles, Layers } from 'lucide-react';
+import { Sparkles, LogOut } from 'lucide-react';
 
-export const Header: React.FC = () => {
+export const Header: React.FC<{ onSignOut: () => void }> = ({ onSignOut }) => {
   return (
     <header className="app-header">
       <div className="brand-container">
@@ -13,14 +13,8 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="header-meta">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#94A3B8' }}>
-          <Layers size={16} />
-          <span>Tenant: default</span>
-        </div>
-        <div className="status-badge">
-          <span className="status-dot"></span>
-          <span>Engine Online</span>
-        </div>
+        <span className="header-context">Registry console</span>
+        <button type="button" className="header-signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
       </div>
     </header>
   );

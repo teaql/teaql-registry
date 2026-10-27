@@ -76,7 +76,9 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - **Recommendation**: For the vast majority of workflows, standard **filesystem storage** (or local S3) is the recommended default and fully sufficient, delivering sub-5ms latency via OS page cache without significant RAM overhead.
 - **Embedded Web Console**:
   - React 18 + TypeScript SPA embedded directly inside the binary (zero static file dependencies, no external font/CDN requests).
-  - Repository management, artifact search with install snippet generators, storage ops (GC / retention cleanup), access token management, and service log viewer.
+  - A dedicated sign-in page is shown before any console data, including when anonymous package reads are enabled. Invalid credentials appear inline; console requests suppress the browser's native HTTP Basic prompt without changing package-client challenges.
+  - Task-first navigation: troubleshoot failed downloads, check offline inventory, connect native clients, configure repositories, inspect artifacts, then manage storage and service logs. Repository creation and token revocation use inline panels rather than modal dialogs.
+  - The offline inventory check accepts up to 20 exact Maven, npm, or Cargo coordinates and reports whether matching components are recorded. It does not certify transitive dependencies, protocol metadata, or blob availability; verify with a native build using an empty client cache while upstream is unavailable.
 - **Standalone Terminal TUI Client (`registry-tui`)**:
   - Zero-dependency, 2.6 MB single static binary built with Ratatui.
   - Designed for SSH jump host / bastion environments where browser access is unavailable.
