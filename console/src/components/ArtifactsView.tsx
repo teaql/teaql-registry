@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SearchComponentItem, Repository } from '../types';
 import { searchComponents } from '../api';
-import { Search, Download, Copy, Check, Terminal, FileCode, Box, ShieldCheck } from 'lucide-react';
+import { Search, Download, Copy, Check, FileCode, Box, ShieldCheck } from 'lucide-react';
 import { SearchableSelect } from './SearchableSelect';
 
 interface Props {
@@ -19,6 +19,11 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo, init
   const [error, setError] = useState('');
 
   const performSearch = async () => {
+    if (!keyword.trim()) {
+      setComponents([]);
+      setError('');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -91,7 +96,6 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo, init
     return (
       <div className="code-snippet-box">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflowX: 'auto' }}>
-          <Terminal size={14} color="#29B5E8" />
           <pre style={{ margin: 0, fontFamily: 'inherit' }}>{snippet}</pre>
         </div>
         <button
@@ -144,9 +148,9 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo, init
       ) : components.length === 0 ? (
         <div className="repo-card" style={{ textAlign: 'center', padding: '3.5rem 1rem' }}>
           <Box size={40} color="#94A3B8" style={{ margin: '0 auto 1rem auto' }} />
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>No artifacts found</h3>
+          <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>{keyword.trim() ? 'No artifacts found' : 'Search for a package'}</h3>
           <p style={{ color: '#64748B', fontSize: '0.9rem', maxWidth: '420px', margin: '0.5rem auto 0 auto' }}>
-            Try publishing artifacts using your package manager (mvn deploy, npm publish, docker push) or check your search keywords.
+            {keyword.trim() ? 'Check your package name or search another repository.' : 'Enter a package name, group, or version to find artifacts.'}
           </p>
         </div>
       ) : (

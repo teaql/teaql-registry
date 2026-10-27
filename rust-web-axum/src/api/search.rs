@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Json, Response},
 };
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::api::AppState;
@@ -52,6 +53,111 @@ pub struct SearchResponse<T> {
     pub page_size: usize,
 }
 
+// Compare numeric version segments before qualifiers so that 1.169 sorts after
+// 1.132, while a final release sorts after a snapshot or release candidate.
+fn compare_versions(left: &str, right: &str) -> Ordering {
+    match (numeric_version(left), numeric_version(right)) {
+        (Some((left_numbers, left_qualifier)), Some((right_numbers, right_qualifier))) => {
+            for index in 0..left_numbers.len().max(right_numbers.len()) {
+                let order = left_numbers
+                    .get(index)
+                    .unwrap_or(&0)
+                    .cmp(right_numbers.get(index).unwrap_or(&0));
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
+            qualifier_rank(left_qualifier)
+                .cmp(&qualifier_rank(right_qualifier))
+                .then_with(|| natural_version_cmp(left_qualifier, right_qualifier))
+        }
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => natural_version_cmp(left, right),
+    }
+}
+
+fn numeric_version(version: &str) -> Option<(Vec<u64>, &str)> {
+    let version = version.strip_prefix(['v', 'V']).unwrap_or(version);
+    let end = version
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(version.len());
+    let core = &version[..end];
+    if core.is_empty() || core.ends_with('.') {
+        return None;
+    }
+    let numbers = core
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<u64>, _>>()
+        .ok()?;
+    let qualifier = version[end..].trim_start_matches(['-', '.', '_', '+']);
+    Some((numbers, qualifier))
+}
+
+fn qualifier_rank(qualifier: &str) -> u8 {
+    let qualifier = qualifier.to_ascii_lowercase();
+    if qualifier.is_empty() || ["release", "final", "ga"].contains(&qualifier.as_str()) {
+        5
+    } else if qualifier.starts_with("sp") {
+        6
+    } else if qualifier.starts_with("rc") || qualifier.starts_with("cr") {
+        4
+    } else if qualifier.starts_with("beta") {
+        3
+    } else if qualifier.starts_with("alpha") {
+        2
+    } else if qualifier.starts_with("snapshot")
+        || qualifier.starts_with("dev")
+        || qualifier.starts_with("pre")
+    {
+        1
+    } else {
+        3
+    }
+}
+
+fn natural_version_cmp(left: &str, right: &str) -> Ordering {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < left.len() && j < right.len() {
+        if left[i].is_ascii_digit() && right[j].is_ascii_digit() {
+            let (mut left_start, mut right_start) = (i, j);
+            while i < left.len() && left[i].is_ascii_digit() {
+                i += 1;
+            }
+            while j < right.len() && right[j].is_ascii_digit() {
+                j += 1;
+            }
+            while left_start < i && left[left_start] == b'0' {
+                left_start += 1;
+            }
+            while right_start < j && right[right_start] == b'0' {
+                right_start += 1;
+            }
+            let left_number = &left[left_start..i];
+            let right_number = &right[right_start..j];
+            let order = left_number
+                .len()
+                .cmp(&right_number.len())
+                .then_with(|| left_number.cmp(right_number));
+            if order != Ordering::Equal {
+                return order;
+            }
+        } else {
+            let order = left[i]
+                .to_ascii_lowercase()
+                .cmp(&right[j].to_ascii_lowercase());
+            if order != Ordering::Equal {
+                return order;
+            }
+            i += 1;
+            j += 1;
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
 pub async fn handle_search_components(
     State(_state): State<AppState>,
     axum::extract::Extension(request): axum::extract::Extension<
@@ -88,11 +194,39 @@ pub async fn handle_search_components(
                 _ => continue,
             };
 
-        let components =
-            match ComponentService::list_by_repository(&request.runtime, content_repo.id()).await {
-                Ok(c) => c,
-                _ => continue,
+        let has_filter = params.name.is_some()
+            || params.version.is_some()
+            || params.group.is_some()
+            || params.keyword.is_some();
+        let mut components = Vec::new();
+        let mut offset = 0;
+        loop {
+            let (page, has_more) = match ComponentService::list_search_page(
+                &request.runtime,
+                content_repo.id(),
+                1000,
+                offset,
+            )
+            .await
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             };
+            components.extend(page);
+            if !has_more || !has_filter {
+                break;
+            }
+            offset += 1000;
+            if offset >= 100_000 {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Search exceeds 100,000 components in a repository",
+                )
+                    .into_response();
+            }
+        }
 
         for comp in components {
             // Filter by name
@@ -128,36 +262,6 @@ pub async fn handle_search_components(
                 }
             }
 
-            // Fetch assets for this component
-            let assets: Vec<_> =
-                AssetService::list_by_component_with_blobs(&request.runtime, comp.id())
-                    .await
-                    .unwrap_or_default();
-
-            let mut asset_items = Vec::new();
-            for asset in assets {
-                let mut checksums = HashMap::new();
-                let (size, content_type) = if let Some(blob) = asset.blob() {
-                    checksums.insert("sha1".to_string(), blob.sha1_checksum().to_owned());
-                    checksums.insert("sha256".to_string(), blob.sha256_checksum().to_owned());
-                    checksums.insert("md5".to_string(), blob.md5_checksum().to_owned());
-                    (blob.blob_size(), blob.content_type().to_owned())
-                } else {
-                    (0, "application/octet-stream".to_string())
-                };
-
-                asset_items.push(SearchAssetItem {
-                    id: asset.id(),
-                    path: asset.path().to_owned(),
-                    download_url: format!("/repository/{}{}", repo.name(), asset.path()),
-                    format: content_repo.format_name().to_string(),
-                    repository: repo.name().to_string(),
-                    content_type,
-                    size,
-                    checksum: checksums,
-                });
-            }
-
             component_results.push(SearchComponentItem {
                 id: comp.id(),
                 name: comp.name().to_string(),
@@ -165,21 +269,65 @@ pub async fn handle_search_components(
                 version: comp.version_name().to_string(),
                 format: content_repo.format_name().to_string(),
                 repository: repo.name().to_string(),
-                assets: asset_items,
+                assets: Vec::new(),
             });
         }
     }
+
+    // Sort before pagination so the first page shows recent versions of each package.
+    component_results.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| {
+                left.group
+                    .to_ascii_lowercase()
+                    .cmp(&right.group.to_ascii_lowercase())
+            })
+            .then_with(|| compare_versions(&right.version, &left.version))
+            .then_with(|| left.repository.cmp(&right.repository))
+            .then_with(|| right.id.cmp(&left.id))
+    });
 
     let total = component_results.len();
     let page = params.page.unwrap_or(1).max(1);
     let page_size = params.page_size.unwrap_or(20).clamp(1, 100);
     let start = (page - 1) * page_size;
 
-    let paged_items: Vec<SearchComponentItem> = component_results
+    let mut paged_items: Vec<SearchComponentItem> = component_results
         .into_iter()
         .skip(start)
         .take(page_size)
         .collect();
+
+    // Fetch files only for the visible page, not every matching version.
+    for item in &mut paged_items {
+        let assets = AssetService::list_by_component_with_blobs(&request.runtime, item.id)
+            .await
+            .unwrap_or_default();
+        for asset in assets {
+            let mut checksums = HashMap::new();
+            let (size, content_type) = if let Some(blob) = asset.blob() {
+                checksums.insert("sha1".to_string(), blob.sha1_checksum().to_owned());
+                checksums.insert("sha256".to_string(), blob.sha256_checksum().to_owned());
+                checksums.insert("md5".to_string(), blob.md5_checksum().to_owned());
+                (blob.blob_size(), blob.content_type().to_owned())
+            } else {
+                (0, "application/octet-stream".to_string())
+            };
+
+            item.assets.push(SearchAssetItem {
+                id: asset.id(),
+                path: asset.path().to_owned(),
+                download_url: format!("/repository/{}{}", item.repository, asset.path()),
+                format: item.format.clone(),
+                repository: item.repository.clone(),
+                content_type,
+                size,
+                checksum: checksums,
+            });
+        }
+    }
 
     Json(SearchResponse {
         items: paged_items,
@@ -286,4 +434,39 @@ pub async fn handle_search_assets(
         page_size,
     })
     .into_response()
+}
+
+#[cfg(test)]
+mod version_order_tests {
+    use super::compare_versions;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn maven_release_versions_sort_numerically() {
+        assert_eq!(
+            compare_versions("1.169-RELEASE", "1.132-RELEASE"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("1.10-RELEASE", "1.9-RELEASE"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("1.10-RELEASE", "1.10-SNAPSHOT"),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn release_and_numeric_suffix_ordering() {
+        assert_eq!(compare_versions("2.0.0", "2.0.0-rc.1"), Ordering::Greater);
+        assert_eq!(
+            compare_versions("2.0.0-rc.10", "2.0.0-rc.9"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("release-10", "release-9"),
+            Ordering::Greater
+        );
+    }
 }
