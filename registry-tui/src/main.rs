@@ -45,6 +45,14 @@ struct Args {
     /// Personal Access Token (PAT) for Bearer authentication
     #[arg(short, long, env = "REGISTRY_TOKEN")]
     token: Option<String>,
+
+    /// Open artifact search for this package after login
+    #[arg(long, conflicts_with = "failure")]
+    package: Option<String>,
+
+    /// Open recent failed requests matching this text after login
+    #[arg(long)]
+    failure: Option<String>,
 }
 
 #[tokio::main]
@@ -77,8 +85,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut app = App::new(client);
+    let mut app = App::new(client, args.endpoint.clone());
     app.initialize().await;
+    if let Some(package) = &args.package {
+        app.open_startup_package(package).await;
+    } else if let Some(query) = &args.failure {
+        app.open_startup_failure(query).await;
+    }
 
     // Run the TUI event loop
     run_tui(&mut app).await?;

@@ -83,10 +83,12 @@ TeaQL Registry is **not intended to replace enterprise master registries** like 
   - Facet integration check: `cargo test -p teaql-registry --test search_test test_repository_facets_follow_component_filters -- --nocapture` with the documented PostgreSQL environment variables. It creates Maven and npm packages with the same name, verifies both repositories appear, then narrows by group and verifies only the matching repository remains.
   - The offline inventory check accepts up to 20 exact Maven, npm, or Cargo coordinates and reports whether matching components are recorded. It does not certify transitive dependencies, protocol metadata, or blob availability; verify with a native build using an empty client cache while upstream is unavailable.
 - **Standalone Terminal TUI Client (`registry-tui`)**:
-  - Zero-dependency, 2.6 MB single static binary built with Ratatui.
+  - Standalone terminal binary built with Ratatui.
   - Designed for SSH jump host / bastion environments where browser access is unavailable.
   - Interactive login with password masking, connection verification before entering the UI.
-  - Command-driven transcript for status, repositories, artifact search, inspection, GC, cleanup, and token generation.
+  - Task-first home screen prioritizes failed requests, offline inventory, native-client setup, publication verification, and maintenance. Recent failures are visible immediately after login.
+  - `failures` inspects recent request errors; `ready` checks 1–20 exact Maven, npm, or Cargo versions recorded in the catalog. The check is not a substitute for a native-client build while upstream is unavailable.
+  - Command-driven transcript retains repository inspection, status, GC, cleanup, and token generation. `--package` or `--failure` opens a specific investigation after login.
 - **Per-Tenant Service Logs**:
   - Best-effort operational history for artifact upload/download operations; it is isolated from the durable TeaQL mutation audit ledger and never blocks artifact traffic.
   - Records event time, username, client IP, action, repository, artifact path, content size, and status.
@@ -179,6 +181,10 @@ registry-tui -e http://10.0.0.10:8081 -u admin -p <password>
 # Or use a Personal Access Token
 registry-tui -e http://10.0.0.10:8081 --token tql_pat_xxx
 
+# Open a package or failure investigation directly after login
+registry-tui -e http://10.0.0.10:8081 --package teaql-mysql
+registry-tui -e http://10.0.0.10:8081 --failure teaql-mysql
+
 # Credentials can also be set via environment variables
 export REGISTRY_ENDPOINT=http://10.0.0.10:8081
 export REGISTRY_USER=admin
@@ -186,26 +192,34 @@ export REGISTRY_PASSWORD=<password>
 registry-tui
 ```
 
-<p align="center">
-  <img src="docs/images/teaql-registry-tui.png" alt="TeaQL Registry TUI connected to a live local registry" width="100%">
-</p>
+After login, use ↑/↓ and Enter to choose a task, or type a command directly. The
+home screen shows failures from the latest 20 requests. `failures` searches the
+latest 100 requests; use the server's service-log API for older history.
 
-<p align="center"><em>Live local registry: system health, repository inventory, and interactive operations over SSH-friendly TUI.</em></p>
-
-**TUI Controls**:
+**TUI task commands**:
 
 | Input | Action |
 |---|---|
-| `status` | Refresh system status |
-| `repos` | List repositories |
-| `comps [repo]` | List components, optionally filtered by repository |
-| `search <keyword>` | Search artifacts |
+| `home` | Return to the task menu and recent failures |
+| `failures [package]` | Show recent failed requests; Enter inspects status, path and error |
+| `ready maven2 org.example:library:1.2.3 [more...] [--repo name]` | Check exact Maven versions in the catalog |
+| `ready npm @scope/package@1.2.3` / `ready cargo serde@1.0.0` | Check exact npm or Cargo versions; up to 20 per command |
+| `connect [repository-or-format]` | Select a repository and view native-client setup using the configured endpoint |
+| `search <keyword>` | Verify published versions and files |
+| `ops` | Show maintenance commands |
+| `status` / `repos` / `comps [repo]` | Inspect status, repositories and components |
 | `inspect [name]` | Inspect the selected or named item |
 | `gc` / `cleanup [repo]` | Run storage maintenance |
 | `token` | Generate a temporary token |
 | `↑` / `↓` | Navigate the active list or command history |
 | `PageUp` / `PageDown` | Scroll the transcript |
 | `help` / `q` | Show help / quit |
+
+The readiness command confirms catalog records only. Finish with an empty
+native-client cache and a controlled upstream outage to prove offline use.
+The TUI workflow checks run with `cargo test -p registry-tui`; they cover
+task selection, failure details, exact-version checks, endpoint-aware client
+setup, and a 90×24 terminal rendering.
 
 ### 3. Seed Demo Packages
 

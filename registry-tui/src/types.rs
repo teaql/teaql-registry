@@ -50,6 +50,31 @@ pub struct SearchResponse {
     pub page_size: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ComponentSearch {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub version: String,
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    pub page: usize,
+    pub page_size: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct ServiceLogItem {
+    pub id: u64,
+    pub event_time: String,
+    pub action: String,
+    pub repository_name: String,
+    pub artifact_path: String,
+    pub status: String,
+    pub error_message: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct GcReport {
     pub scanned_blobs_count: usize,

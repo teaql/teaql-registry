@@ -4,7 +4,8 @@ use reqwest::Client;
 use std::time::Duration;
 
 use crate::types::{
-    CleanupReport, CreateTokenResponse, GcReport, RepositoryItem, SearchResponse, ServerOverview,
+    CleanupReport, ComponentSearch, CreateTokenResponse, GcReport, RepositoryItem, SearchResponse,
+    ServerOverview, ServiceLogItem,
 };
 
 /// Trait abstracting all registry API calls.
@@ -14,6 +15,8 @@ pub trait RegistryApi: Send + Sync {
     async fn fetch_overview(&self) -> Result<ServerOverview>;
     async fn fetch_repositories(&self) -> Result<Vec<RepositoryItem>>;
     async fn search_components(&self, keyword: &str) -> Result<SearchResponse>;
+    async fn search_exact_page(&self, query: &ComponentSearch) -> Result<SearchResponse>;
+    async fn fetch_service_logs(&self, size: usize) -> Result<Vec<ServiceLogItem>>;
     async fn fetch_metrics(&self) -> Result<String>;
     async fn run_gc(&self) -> Result<GcReport>;
     async fn run_cleanup(&self, repo_name: &str, max_versions: usize) -> Result<CleanupReport>;
@@ -140,6 +143,28 @@ impl RegistryApi for RegistryClient {
         let resp = req.send().await.context("Search failed")?;
         let search = resp.json::<SearchResponse>().await?;
         Ok(search)
+    }
+
+    async fn search_exact_page(&self, query: &ComponentSearch) -> Result<SearchResponse> {
+        let url = format!("{}/service/rest/v1/search", self.endpoint);
+        let req = self.apply_auth(self.client.get(&url).query(query));
+        let response = req.send().await.context("Inventory search failed")?;
+        Ok(response
+            .error_for_status()
+            .context("Inventory search rejected")?
+            .json::<SearchResponse>()
+            .await?)
+    }
+
+    async fn fetch_service_logs(&self, size: usize) -> Result<Vec<ServiceLogItem>> {
+        let url = format!("{}/service/rest/v1/service-logs", self.endpoint);
+        let req = self.apply_auth(self.client.get(&url).query(&[("size", size.min(200))]));
+        let response = req.send().await.context("Failed to load request history")?;
+        Ok(response
+            .error_for_status()
+            .context("Request history rejected")?
+            .json::<Vec<ServiceLogItem>>()
+            .await?)
     }
 
     async fn fetch_metrics(&self) -> Result<String> {

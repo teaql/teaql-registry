@@ -18,13 +18,14 @@ pub fn render_app(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    render_top_bar(f, chunks[0]);
+    render_top_bar(f, app, chunks[0]);
     render_transcript(f, app, chunks[1]);
     render_input(f, app, chunks[2]);
 }
 
-fn render_top_bar(f: &mut Frame, area: Rect) {
-    let dashes = "─".repeat(area.width.saturating_sub(20) as usize);
+fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
+    let endpoint = app.endpoint.trim_end_matches('/');
+    let dashes = "─".repeat(area.width.saturating_sub((endpoint.len() + 21) as u16) as usize);
     let line = Line::from(vec![
         Span::styled(
             " ❄ TeaQL Registry ",
@@ -33,6 +34,7 @@ fn render_top_bar(f: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(dashes, Style::default().fg(Color::DarkGray)),
+        Span::styled(format!(" {endpoint}"), Style::default().fg(Color::DarkGray)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -55,8 +57,16 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(sep), input_chunks[0]);
 
     // Input line with cursor
-    let before: String = app.input[..app.input_cursor].to_string();
-    let after: String = app.input[app.input_cursor..].to_string();
+    let before = &app.input[..app.input_cursor];
+    let after = &app.input[app.input_cursor..];
+    let available = area.width.saturating_sub(6) as usize;
+    let after_chars: Vec<char> = after.chars().collect();
+    let after_visible = after_chars.len().min(available.saturating_sub(1) / 2);
+    let before_budget = available.saturating_sub(after_visible + 1);
+    let mut before_chars: Vec<char> = before.chars().rev().take(before_budget).collect();
+    before_chars.reverse();
+    let before_visible: String = before_chars.into_iter().collect();
+    let after_visible: String = after_chars.into_iter().take(after_visible).collect();
     let input_line = Line::from(vec![
         Span::styled(
             "  > ",
@@ -64,9 +74,9 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(before, Style::default().fg(Color::White)),
+        Span::styled(before_visible, Style::default().fg(Color::White)),
         Span::styled("▎", Style::default().fg(Color::Yellow)),
-        Span::styled(after, Style::default().fg(Color::White)),
+        Span::styled(after_visible, Style::default().fg(Color::White)),
     ]);
     f.render_widget(Paragraph::new(input_line), input_chunks[1]);
 
@@ -74,7 +84,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let hints = Line::from(vec![
         Span::styled("    ", Style::default()),
         Span::styled(
-            "repos · comps · search <kw> · inspect [name] · gc · cleanup · token · help · q",
+            "home · failures [name] · ready <format> <coordinate> · connect [repo] · search <name> · ops · q",
             Style::default().fg(Color::DarkGray),
         ),
     ]);
@@ -172,6 +182,177 @@ fn render_block_to_lines(
                 Span::styled("  ✗ ".to_string(), Style::default().fg(Color::Red)),
                 Span::styled(msg.clone(), Style::default().fg(Color::Red)),
             ]));
+        }
+
+        Block::Home {
+            recent_failures,
+            repository_count,
+            logs_error,
+            cursor,
+        } => {
+            lines.push(section_line("What do you need to do?", width));
+            lines.push(Line::from(Span::styled(
+                format!("    {repository_count} repositories available · ↑↓ choose, Enter open · type a command at any time"),
+                Style::default().fg(Color::DarkGray),
+            )));
+            lines.push(Line::from(""));
+            let tasks = [
+                ("1", "Diagnose a failed request", "failures [package]"),
+                (
+                    "2",
+                    "Check offline inventory",
+                    "ready <format> <coordinates>",
+                ),
+                ("3", "Connect a native client", "connect [repository]"),
+                ("4", "Verify a publication", "search <package>"),
+                ("5", "Maintain the registry", "ops"),
+            ];
+            for (index, (number, label, command)) in tasks.iter().enumerate() {
+                let selected = is_active && index == *cursor;
+                let style = if selected {
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(if selected { "  ▸ " } else { "    " }, style),
+                    Span::styled(format!("{number}. {label:<30}"), style),
+                    Span::styled((*command).to_string(), Style::default().fg(Color::Cyan)),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(section_line("Recent failed requests", width));
+            if *logs_error {
+                lines.push(Line::from(
+                    "    Request history unavailable. Type 'failures' to retry.",
+                ));
+            } else if recent_failures.is_empty() {
+                lines.push(Line::from("    No failures in the latest 20 requests."));
+            } else {
+                for log in recent_failures {
+                    lines.push(Line::from(format!(
+                        "    {}  {}  {}",
+                        log.status, log.repository_name, log.artifact_path
+                    )));
+                }
+                lines.push(Line::from(Span::styled(
+                    "    Type 'failures' to inspect the latest 100 requests.",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+
+        Block::FailureList {
+            query,
+            logs,
+            cursor,
+        } => {
+            let (start, end) = visible_window(*cursor, logs.len(), 8);
+            let title = if query.is_empty() {
+                format!("Recent failed requests ({})", logs.len())
+            } else {
+                format!("Failures matching '{query}' ({})", logs.len())
+            };
+            lines.push(section_line(&title, width));
+            lines.push(Line::from(
+                "    Most recent 100 requests · ↑↓ select · Enter inspect",
+            ));
+            if logs.is_empty() {
+                lines.push(Line::from("    No matching failures in this window."));
+            }
+            for (index, log) in logs.iter().enumerate().take(end).skip(start) {
+                let selected = is_active && index == *cursor;
+                let style = if selected {
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(if selected { "  ▸ " } else { "    " }, style),
+                    Span::styled(
+                        format!("{:<8} {:<20} ", log.status, log.repository_name),
+                        Style::default().fg(Color::Red),
+                    ),
+                    Span::styled(log.artifact_path.clone(), style),
+                ]));
+            }
+        }
+
+        Block::FailureDetail { log } => {
+            lines.push(section_line("Request failure", width));
+            for (label, value) in [
+                ("Time", log.event_time.as_str()),
+                ("Status", log.status.as_str()),
+                ("Action", log.action.as_str()),
+                ("Repository", log.repository_name.as_str()),
+                ("Artifact", log.artifact_path.as_str()),
+                ("Error", log.error_message.as_str()),
+            ] {
+                lines.push(Line::from(format!("    {label:<12} {value}")));
+            }
+            lines.push(Line::from("    Next: search <package> to inspect inventory; connect <repo> to verify client URL."));
+        }
+
+        Block::ReadinessGuide => {
+            lines.push(section_line("Check offline inventory", width));
+            lines.push(Line::from("    Enter 1–20 exact versions in one command:"));
+            lines.push(Line::from(
+                "    ready maven2 org.example:library:1.2.3 [more...] [--repo maven-releases]",
+            ));
+            lines.push(Line::from(
+                "    ready npm @scope/package@1.2.3 [more...] [--repo npm-hosted]",
+            ));
+            lines.push(Line::from(
+                "    ready cargo serde@1.0.0 [more...] [--repo cargo-hosted]",
+            ));
+            lines.push(Line::from("    Recorded means catalog presence only; it does not prove blobs or transitive dependencies."));
+        }
+
+        Block::ReadinessResults { results } => {
+            let found = results
+                .iter()
+                .filter(|result| result.repository.is_some())
+                .count();
+            lines.push(section_line(
+                &format!("Offline inventory: {found}/{} recorded", results.len()),
+                width,
+            ));
+            for result in results {
+                let label = result.repository.as_deref().unwrap_or("Missing");
+                lines.push(Line::from(format!(
+                    "    {}  {}  {label}",
+                    if result.repository.is_some() {
+                        "✓"
+                    } else {
+                        "✗"
+                    },
+                    result.coordinate
+                )));
+            }
+            lines.push(Line::from("    Final check: empty the native client cache, disconnect upstream, then run the project build."));
+        }
+
+        Block::Operations => {
+            lines.push(section_line("Registry maintenance", width));
+            lines.push(Line::from(
+                "    repos                 Review repository routes and formats",
+            ));
+            lines.push(Line::from(
+                "    status                Check service and inventory totals",
+            ));
+            lines.push(Line::from("    gc                    Purge orphaned blobs"));
+            lines.push(Line::from(
+                "    cleanup <repo>        Apply retention cleanup to a repository",
+            ));
+            lines.push(Line::from(
+                "    token                 Create a seven-day client token",
+            ));
         }
 
         Block::Status { overview } => {
@@ -583,17 +764,19 @@ fn render_block_to_lines(
         }
 
         Block::Help => {
-            lines.push(section_line("Available Commands", width));
+            lines.push(section_line("Task commands", width));
             lines.push(Line::from(""));
             let commands: &[(&str, &str)] = &[
-                ("repos, r", "List all repositories"),
-                ("comps [repo], c", "List components (filter by repo)"),
-                ("search <keyword>, s", "Search components by name"),
-                ("inspect [name], i", "Inspect selected or named item"),
-                ("status, st", "Show system status"),
-                ("gc", "Run garbage collection"),
-                ("cleanup [repo]", "Run retention cleanup"),
-                ("token", "Generate temporary PAT token"),
+                ("home", "Return to the task menu and recent failures"),
+                ("failures [package]", "Inspect recent failed requests"),
+                ("ready <format> ...", "Check exact versions in the catalog"),
+                ("connect [repo]", "Get native-client setup for a repository"),
+                ("search <package>", "Verify versions and files"),
+                ("ops", "Show maintenance commands"),
+                ("repos / comps", "Browse repositories / components"),
+                ("inspect [name]", "Inspect selected or named item"),
+                ("status / gc / cleanup", "Status and storage maintenance"),
+                ("token", "Generate a temporary client token"),
                 ("clear, cls", "Clear the transcript"),
                 ("help, h, ?", "Show this help"),
                 ("quit, q", "Exit"),
@@ -710,5 +893,75 @@ fn component_usage_snippet(component: &crate::types::ComponentItem) -> String {
             }
         }
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::RegistryClient;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::sync::Arc;
+
+    #[test]
+    fn home_tasks_fit_a_standard_terminal() {
+        let endpoint = "https://registry.example.test".to_string();
+        let mut app = App::new(
+            Arc::new(RegistryClient::new(&endpoint, None, None, None)),
+            endpoint,
+        );
+        app.blocks.push(Block::Home {
+            recent_failures: Vec::new(),
+            repository_count: 18,
+            logs_error: false,
+            cursor: 0,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for label in [
+            "Diagnose a failed request",
+            "Check offline inventory",
+            "Connect a native client",
+            "Verify a publication",
+            "Maintain the registry",
+            "Recent failed requests",
+        ] {
+            assert!(screen.contains(label), "missing {label} on home screen");
+        }
+    }
+
+    #[test]
+    fn long_readiness_command_keeps_cursor_and_last_coordinate_visible() {
+        let endpoint = "https://registry.example.test".to_string();
+        let mut app = App::new(
+            Arc::new(RegistryClient::new(&endpoint, None, None, None)),
+            endpoint,
+        );
+        app.input = format!(
+            "ready maven2 {} org.example:last:1.0.0",
+            "org.example:library:1.0.0 ".repeat(10)
+        );
+        app.input_cursor = app.input.len();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(screen.contains("org.example:last:1.0.0▎"));
     }
 }
