@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Check, Copy, Link2, Terminal } from 'lucide-react';
 import { Repository } from '../types';
 import { AccessTokensView } from './AccessTokensView';
+import { SearchableSelect } from './SearchableSelect';
 
 export const ConnectionView: React.FC<{ repositories: Repository[] }> = ({ repositories }) => {
   const [selected, setSelected] = useState('');
@@ -28,7 +29,7 @@ export const ConnectionView: React.FC<{ repositories: Repository[] }> = ({ repos
       <section className="workflow-panel connection-panel">
         <div className="panel-heading"><Link2 size={19} /><h2>Repository endpoint</h2></div>
         {repositories.length === 0 ? <p className="muted">No repositories have been configured yet.</p> : <>
-          <div className="form-group"><label className="form-label" htmlFor="connection-repo">Repository</label><select id="connection-repo" className="form-select" value={repository?.name || ''} onChange={event => setSelected(event.target.value)}>{repositories.map(repo => <option key={repo.name} value={repo.name}>{repo.name} · {repo.format} · {repo.type}</option>)}</select></div>
+          <div className="form-group"><label className="form-label" htmlFor="connection-repo">Repository</label><SearchableSelect id="connection-repo" value={repository?.name || ''} onChange={setSelected} options={repositories.map(repo => ({ value: repo.name, label: `${repo.name} · ${repo.format} · ${repo.type}` }))} /></div>
           <div className="endpoint-box"><strong>Endpoint</strong><code>{endpoint}</code></div>
           <div className="panel-heading snippet-heading"><Terminal size={19} /><h2>Client example</h2></div>
           <div className="code-snippet-box"><pre>{snippet}</pre><button type="button" className="copy-btn" aria-label="Copy client example" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div>

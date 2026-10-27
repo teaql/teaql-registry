@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { SearchComponentItem, Repository } from '../types';
 import { searchComponents } from '../api';
 import { Search, Download, Copy, Check, Terminal, FileCode, Box, ShieldCheck } from 'lucide-react';
+import { SearchableSelect } from './SearchableSelect';
 
 interface Props {
   repositories: Repository[];
@@ -123,19 +124,13 @@ export const ArtifactsView: React.FC<Props> = ({ repositories, initialRepo, init
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
-        <select
-          className="form-select"
-          style={{ width: '220px', border: 'none', background: '#F1F5F9', fontWeight: 500 }}
+        <SearchableSelect
+          ariaLabel="Repository"
+          className="artifact-repo-select"
           value={selectedRepo}
-          onChange={(e) => setSelectedRepo(e.target.value)}
-        >
-          <option value="">All Repositories</option>
-          {repositories.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name} ({r.format})
-            </option>
-          ))}
-        </select>
+          onChange={setSelectedRepo}
+          options={[{ value: '', label: 'All Repositories' }, ...repositories.map(repo => ({ value: repo.name, label: `${repo.name} (${repo.format})` }))]}
+        />
         <button type="submit" className="btn btn-primary btn-sm" style={{ padding: '0.5rem 1rem' }}>
           Search
         </button>
